@@ -6,6 +6,7 @@ import '@tabler/core/dist/css/tabler.min.css';
 import { useRouter } from 'next/navigation'
 import { useState, useEffect, useRef } from 'react'
 import NumberFlow from '@number-flow/react'
+import LogoutButton from '@/components/logoutButton'
 import {
   AreaChart,
   XAxis,
@@ -64,8 +65,8 @@ import { Content, Inter } from 'next/font/google';
 const inter = Inter({ subsets: ['latin'] });
 
 //const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
+const api_startpoint = 'http://152.42.239.141:5000'
 // const api_startpoint = 'http://152.42.239.141:5000'
-const api_startpoint = 'http://127.0.0.1:5000'
 
 interface userTypeChart {
   count:number,
@@ -172,11 +173,11 @@ const jigyasaGroupings = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly', '
 const pragyaGroupings = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'lifetime'];
 
 export default function UserAnalyticsDashboard() {
-const router = useRouter()
+  const router = useRouter()
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
-    if (!token) {
+    const isLoggedIn = sessionStorage.getItem('isLoggedIn')
+    if (!isLoggedIn) {
       router.push('/login')
     }
   }, [])

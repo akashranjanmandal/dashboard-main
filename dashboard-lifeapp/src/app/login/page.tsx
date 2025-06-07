@@ -1,5 +1,4 @@
 'use client'
-
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
@@ -8,108 +7,104 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
-    setError('')
 
     try {
-      const res = await fetch('http://127.0.0.1:5000/api/login', {
+      const res = await fetch('http://152.42.239.141:5000/api/login', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       })
 
       const data = await res.json()
 
       if (res.ok) {
-        localStorage.setItem('token', data.accessToken)
-        router.push('/') // redirect to dashboard
+        sessionStorage.setItem('isLoggedIn', 'true')
+        router.push('/')
       } else {
-        setError(data?.errors?.message || 'Invalid credentials')
+        setError(data.errors?.message || 'Login failed')
       }
     } catch (err) {
-      setError('Failed to connect to server. Please try again.')
-    } finally {
-      setLoading(false)
+      setError('Server error. Please try again.')
     }
   }
 
   return (
-    <div
-      style={{
-        height: '100vh',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        background: '#f7f7f7',
-      }}
-    >
+    <div style={{
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      height: '100vh',
+      background: '#f5f5f5'
+    }}>
       <form
         onSubmit={handleLogin}
         style={{
           background: 'white',
-          padding: '2rem',
-          borderRadius: '8px',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
+          padding: '40px',
+          borderRadius: '12px',
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
           width: '100%',
-          maxWidth: '400px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '1rem',
+          maxWidth: '400px'
         }}
       >
-        <h2 style={{ textAlign: 'center' }}>Dashboard Login</h2>
+        <h2 style={{
+          textAlign: 'center',
+          marginBottom: '24px',
+          color: '#333'
+        }}>Admin Login</h2>
 
+        <label style={{ marginBottom: '8px', color: '#555' }}>Email</label>
         <input
           type="email"
           value={email}
           onChange={e => setEmail(e.target.value)}
-          placeholder="Email"
+          placeholder="Enter your email"
           required
           style={{
-            padding: '10px',
-            fontSize: '16px',
-            borderRadius: '4px',
+            padding: '12px',
             border: '1px solid #ccc',
+            borderRadius: '8px',
+            marginBottom: '16px',
+            width: '100%'
           }}
         />
 
+        <label style={{ marginBottom: '8px', color: '#555' }}>Password</label>
         <input
           type="password"
           value={password}
           onChange={e => setPassword(e.target.value)}
-          placeholder="Password"
+          placeholder="Enter your password"
           required
           style={{
-            padding: '10px',
-            fontSize: '16px',
-            borderRadius: '4px',
+            padding: '12px',
             border: '1px solid #ccc',
+            borderRadius: '8px',
+            marginBottom: '24px',
+            width: '100%'
           }}
         />
 
         <button
           type="submit"
-          disabled={loading}
           style={{
-            padding: '10px',
-            fontSize: '16px',
             backgroundColor: '#0070f3',
             color: 'white',
+            padding: '12px',
+            borderRadius: '8px',
             border: 'none',
-            borderRadius: '4px',
-            cursor: loading ? 'not-allowed' : 'pointer',
+            width: '100%',
+            fontWeight: 'bold',
+            cursor: 'pointer'
           }}
         >
-          {loading ? 'Logging in...' : 'Login'}
+          Login
         </button>
 
-        {error && <p style={{ color: 'red', textAlign: 'center' }}>{error}</p>}
+        {error && <p style={{ color: 'red', marginTop: '16px', textAlign: 'center' }}>{error}</p>}
       </form>
     </div>
   )

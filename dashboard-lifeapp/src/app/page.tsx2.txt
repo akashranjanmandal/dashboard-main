@@ -80,7 +80,7 @@ export default function UserAnalyticsDashboard() {
     async function fetchData() {
       try {
         // Update the URL if needed; ensure your Flask server is running
-        const res = await fetch('http://127.0.0.1:5000/api/user-signups')
+        const res = await fetch('http://152.42.239.141:5000/api/user-signups')
         const data = (await res.json()) as SignupData[]
         setChartData(data)
 
@@ -131,7 +131,7 @@ export default function UserAnalyticsDashboard() {
   useEffect(() => {
     async function fetchUserCount() {
       try {
-        const res = await fetch('http://127.0.0.1:5000/api/user-count');
+        const res = await fetch('http://152.42.239.141:5000/api/user-count');
         const data = await res.json();
         if (data && data.length > 0) {
           setTotalUsers(data[0].count);
@@ -149,7 +149,7 @@ export default function UserAnalyticsDashboard() {
   useEffect(() => {
     async function fetchActiveUserCount() {
       try {
-        const res = await fetch('http://127.0.0.1:5000/api/active-user-count');
+        const res = await fetch('http://152.42.239.141:5000/api/active-user-count');
         const data = await res.json();
         // Add a check to ensure data exists and has a valid count
         if (data && data.length > 0 && data[0].active_users !== undefined) {
@@ -172,7 +172,7 @@ export default function UserAnalyticsDashboard() {
   useEffect(() => {
     async function fetchActiveUserCount() {
       try {
-        const res = await fetch('http://127.0.0.1:5000/api/approval-rate');
+        const res = await fetch('http://152.42.239.141:5000/api/approval-rate');
         const data = await res.json();
         // Add a check to ensure data exists and has a valid count
         if (data && data.length > 0 && data[0].Approval_Rate !== undefined) {
@@ -262,7 +262,7 @@ export default function UserAnalyticsDashboard() {
   useEffect(() => {
     async function fetchCouponRedeemCount() {
       try {
-        const res = await fetch('http://127.0.0.1:5000/api/coupons-used-count');
+        const res = await fetch('http://152.42.239.141:5000/api/coupons-used-count');
         const data = await res.json();
         
         // Updated check: no longer looks for data[0].state
@@ -327,7 +327,7 @@ export default function UserAnalyticsDashboard() {
   useEffect(() => {
     async function fetchSchoolStateCounts() {
       try {
-        const res = await fetch('http://127.0.0.1:5000/api/count-school-state');
+        const res = await fetch('http://152.42.239.141:5000/api/count-school-state');
         const data = await res.json();
         
         // Check if data exists and is an array with valid structure
@@ -393,7 +393,7 @@ export default function UserAnalyticsDashboard() {
   useEffect(() => {
     async function fetchTeacherAssignCounts() {
       try {
-        const res = await fetch("http://127.0.0.1:5000/api/teacher-assign-count");
+        const res = await fetch("http://152.42.239.141:5000/api/teacher-assign-count");
         const data = await res.json();
 
         // Extract only assign counts from API response

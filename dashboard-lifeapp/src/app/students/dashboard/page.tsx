@@ -279,7 +279,7 @@ function SearchableDropdown({
   
 // const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
 const api_startpoint = 'http://152.42.239.141:5000'
-// const api_startpoint = 'http://127.0.0.1:5000'
+// const api_startpoint = 'http://152.42.239.141:5000'
 
 export default function StudentDashboard() {
     const [totalStudents, setTotalStudents] = useState<number>(0)
