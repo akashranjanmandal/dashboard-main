@@ -41,11 +41,11 @@ load_dotenv()
 #     )
 
 # DigitalOcean Spaces Config
-DO_SPACES_KEY = os.getenv('DO_SPACES_KEY','DO801AMRN6MGWATRE3RV')
-DO_SPACES_SECRET = os.getenv('DO_SPACES_SECRET','7zUkHzgpfmgSCKDXVNcuSVc9ev2RpztltERRZBW5YjQ')
-DO_SPACES_REGION = os.getenv('DO_SPACES_REGION','blr1')
-DO_SPACES_BUCKET = os.getenv('DO_SPACES_BUCKET','lifeappmedia')
-DO_SPACES_ENDPOINT = os.getenv('DO_SPACES_ENDPOINT','https://blr1.digitaloceanspaces.com')
+DO_SPACES_KEY = os.getenv('DO_SPACES_KEY')
+DO_SPACES_SECRET = os.getenv('DO_SPACES_SECRET')
+DO_SPACES_REGION = os.getenv('DO_SPACES_REGION')
+DO_SPACES_BUCKET = os.getenv('DO_SPACES_BUCKET')
+DO_SPACES_ENDPOINT = os.getenv('DO_SPACES_ENDPOINT')
 
 
 # Initialize Boto3 Client
