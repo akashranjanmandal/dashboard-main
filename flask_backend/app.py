@@ -7042,6 +7042,101 @@ def import_quiz_questions_csv():
     level_id   = request.form.get('level_id')
     topic_id   = request.form.get('topic_id')
     f          = request.files.get('file')
+
+    print(f"[INFO] Received CSV upload request for subject={subject_id}, level={level_id}, topic={topic_id}")
+
+    if not (subject_id and level_id and topic_id and f):
+        print("[ERROR] Missing required form data or file")
+        return jsonify({'error': 'Missing subject_id, level_id, topic_id or file'}), 400
+
+    try:
+        # read CSV
+        stream = io.StringIO(f.stream.read().decode('utf-8').replace('\u2011', '-'))
+        reader = csv.DictReader(stream)
+        inserted = 0
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            for idx, row in enumerate(reader, 1):
+                q_text = row.get('questions', '').strip()
+                if not q_text:
+                    print(f"[WARN] Row {idx}: Skipped empty question")
+                    continue
+
+                print(f"[INFO] Row {idx}: Inserting question '{q_text}'")
+
+                # 1) Insert question
+                q_json = json.dumps({'en': q_text})
+                cursor.execute("""
+                    INSERT INTO lifeapp.la_questions
+                      (title, la_subject_id, la_level_id, la_topic_id,
+                       created_by, question_type, `type`, status,
+                       created_at, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (
+                    q_json,
+                    subject_id,
+                    level_id,
+                    topic_id,
+                    1,  # created_by
+                    1,  # question_type = Text
+                    2,  # game_type = Quiz
+                    1,  # status = Active
+                    now,
+                    now
+                ))
+                qid = cursor.lastrowid
+
+                # 2) Insert options
+                answer_key = row.get('answer', '').strip().lower()
+                correct_idx = None
+                if answer_key.startswith('option'):
+                    try:
+                        correct_idx = int(answer_key.replace('option', '')) - 1
+                    except:
+                        print(f"[WARN] Row {idx}: Invalid answer format '{answer_key}'")
+
+                answer_option_id = None
+                for opt_idx, col in enumerate(['option1', 'option2', 'option3', 'option4']):
+                    txt = row.get(col, '').strip()
+                    opt_json = json.dumps({'en': txt})
+                    cursor.execute("""
+                        INSERT INTO lifeapp.la_question_options
+                          (question_id, title, created_at, updated_at)
+                        VALUES (%s,%s,%s,%s)
+                    """, (qid, opt_json, now, now))
+                    oid = cursor.lastrowid
+                    if correct_idx is not None and opt_idx == correct_idx:
+                        answer_option_id = oid
+
+                # 3) Link correct answer
+                if answer_option_id:
+                    cursor.execute("""
+                        UPDATE lifeapp.la_questions
+                           SET answer_option_id = %s
+                         WHERE id = %s
+                    """, (answer_option_id, qid))
+                    print(f"[INFO] Row {idx}: Linked correct option ID {answer_option_id}")
+
+                inserted += 1
+
+            conn.commit()
+            print(f"[SUCCESS] Inserted {inserted} questions successfully.")
+            return jsonify({'success': True, 'inserted': inserted}), 200
+
+    except Exception as e:
+        print(f"[ERROR] Exception occurred: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+        print("[INFO] Database connection closed.")
+
+    subject_id = request.form.get('subject_id')
+    level_id   = request.form.get('level_id')
+    topic_id   = request.form.get('topic_id')
+    f          = request.files.get('file')
     if not (subject_id and level_id and topic_id and f):
         return jsonify({'error':'Missing subject_id, level_id, topic_id or file'}),400
 
