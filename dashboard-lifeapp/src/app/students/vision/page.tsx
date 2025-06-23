@@ -7,7 +7,8 @@ import { Download, Search, XCircle } from 'lucide-react';
 
 const inter = Inter({ subsets: ['latin'] });
 // const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
-const api_startpoint = 'http://152.42.239.141:5000'
+// const api_startpoint = 'http://152.42.239.141:5000'
+const api_startpoint = 'http://127.0.0.1:5000'
 // const api_startpoint = 'http://152.42.239.141:5000'
 
 
@@ -39,7 +40,7 @@ export default function VisionSessionsPage() {
     const [loading, setLoading] = useState(false);
     const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
     const [inputCode, setInputCode] = useState("");
-    const [filterStatus, setFilterStatus] = useState('');  // '', 'requested','accepted','rejected'
+    const [filterStatus, setFilterStatus] = useState('');  // '', 'requested','approved','rejected'
     // Update existing state declaration
     const [selectedSchoolCode, setSelectedSchoolCode] = useState<string[]>([]);
 
@@ -182,7 +183,7 @@ export default function VisionSessionsPage() {
                                         >
                                             <option value="">All Status</option>
                                             <option value="requested">Requested</option>
-                                            <option value="accepted">Accepted</option>
+                                            <option value="approved">Approved</option>
                                             <option value="rejected">Rejected</option>
                                         </select>
                                     </div>
@@ -301,42 +302,56 @@ export default function VisionSessionsPage() {
                                 <td className="p-2 border">{r.status}</td>
 
                                 {filterStatus === 'requested' && (
-                                    <td className="p-2 border space-x-2">
-                                    <button
-                                        className="btn btn-sm btn-success"
-                                        onClick={async () => {
-                                        await fetch(
-                                            `${api_startpoint}/api/vision_sessions/${r.answer_id}/status`,
-                                            {
-                                            method: 'PUT',
-                                            headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({ status: 'accepted' })
-                                            }
-                                        );
-                                        fetchSessions();
-                                        }}
-                                    >
-                                        Accept
-                                    </button>
+  <td className="p-2 border space-x-2">
+    <button
+      className="btn btn-sm btn-success"
+      onClick={async () => {
+        // First: update status to 'approved'
+        await fetch(
+          `${api_startpoint}/api/vision_sessions/${r.answer_id}/status`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'approved' }),
+          }
+        );
 
-                                    <button
-                                        className="btn btn-sm btn-danger"
-                                        onClick={async () => {
-                                        await fetch(
-                                            `${api_startpoint}/api/vision_sessions/${r.answer_id}/status`,
-                                            {
-                                            method: 'PUT',
-                                            headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({ status: 'rejected' })
-                                            }
-                                        );
-                                        fetchSessions();
-                                        }}
-                                    >
-                                        Reject
-                                    </button>
-                                    </td>
-                                )}
+        // Second: call score API to store points (you can modify the payload as needed)
+        await fetch(
+          `${api_startpoint}/api/vision_sessions/${r.answer_id}/score`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ points: r.points || 10 }), // Example: use r.points or default 10
+          }
+        );
+
+        // Refresh sessions
+        fetchSessions();
+      }}
+    >
+      Approved
+    </button>
+
+    <button
+      className="btn btn-sm btn-danger"
+      onClick={async () => {
+        await fetch(
+          `${api_startpoint}/api/vision_sessions/${r.answer_id}/status`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'rejected' }),
+          }
+        );
+        fetchSessions();
+      }}
+    >
+      Reject
+    </button>
+  </td>
+)}
+
                                 <td className="p-2 border">{new Date(r.created_at).toLocaleDateString()}</td>
                                 </tr>
                             ))}

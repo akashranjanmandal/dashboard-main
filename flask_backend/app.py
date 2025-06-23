@@ -2910,7 +2910,7 @@ def fetch_vision_sessions():
     date_start  = qs.get('date_start')
     date_end    = qs.get('date_end')
     school_codes = qs.getlist('school_codes')
-    status_filt = qs.get('status')   # NEW: 'requested'|'accepted'|'rejected'
+    status_filt = qs.get('status')   # NEW: 'requested'|'approved'|'rejected'
 
     base_sql = '''
     SELECT
@@ -2958,7 +2958,7 @@ def fetch_vision_sessions():
         base_sql += f' AND u.school_code IN ({ph})'; params += school_codes
 
     # NEW: filter by status column
-    if status_filt in ('requested','accepted','rejected'):
+    if status_filt in ('requested','approved','rejected'):
         base_sql += ' AND a.status = %s'; params.append(status_filt)
 
     base_sql += ' ORDER BY a.created_at DESC LIMIT %s OFFSET %s'
@@ -2985,23 +2985,41 @@ def fetch_vision_sessions():
     finally:
         conn.close()
 
-# 6. Update Score Endpoint
 @app.route('/api/vision_sessions/<int:answer_id>/score', methods=['PUT'])
 def update_vision_session_score(answer_id):
-    data = request.get_json() or {}
-    if 'score' not in data:
-        return jsonify({'error': 'Missing score'}), 400
-    score = data['score']
+    score = 25
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            cursor.execute(
-                "UPDATE vision_question_answers SET score = %s, updated_at = NOW() WHERE id = %s",
-                (score, answer_id)
-            )
+            # Step 1: Update score in vision_question_answers
+            cursor.execute("""
+                UPDATE vision_question_answers
+                SET score = %s, updated_at = %s
+                WHERE id = %s
+            """, (score, now, answer_id))
+
+            # Step 2: Insert coin transaction
+            cursor.execute("""
+                INSERT INTO coin_transactions (user_id, type, amount, coinable_type, coinable_id, created_at, updated_at)
+                SELECT user_id, %s, %s, %s, id, %s, %s
+                FROM vision_question_answers
+                WHERE id = %s
+            """, (7, score, 'App\\Models\\VisionQuestionAnswer', now, now, answer_id))
+
+            # Step 3: Update users.earn_coins
+            cursor.execute("""
+                UPDATE users
+                JOIN vision_question_answers ON users.id = vision_question_answers.user_id
+                SET users.earn_coins = users.earn_coins + %s,
+                    users.updated_at = %s
+                WHERE vision_question_answers.id = %s
+            """, (score, now, answer_id))
+
             conn.commit()
-        return jsonify({'success': True}), 200
+            return jsonify({'success': True, 'coins_awarded': score}), 200
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
@@ -3011,11 +3029,11 @@ def update_vision_session_score(answer_id):
 def update_vision_session_status(answer_id):
     data = request.get_json() or {}
     new_status = data.get('status')
-    if new_status not in ('accepted','rejected'):
+    if new_status not in ('approved','rejected'):
         return jsonify({'error':'Invalid status'}), 400
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    if new_status == 'accepted':
+    if new_status == 'approved':
         sql = "UPDATE vision_question_answers SET status=%s, approved_at=%s WHERE id=%s"
         params = (new_status, now, answer_id)
     else:  # rejected
@@ -7038,6 +7056,101 @@ how old are you?,ten,eleven,twelve,thirteen,option3
 
 @app.route('/api/import_quiz_questions_csv', methods=['POST'])
 def import_quiz_questions_csv():
+    subject_id = request.form.get('subject_id')
+    level_id   = request.form.get('level_id')
+    topic_id   = request.form.get('topic_id')
+    f          = request.files.get('file')
+
+    print(f"[INFO] Received CSV upload request for subject={subject_id}, level={level_id}, topic={topic_id}")
+
+    if not (subject_id and level_id and topic_id and f):
+        print("[ERROR] Missing required form data or file")
+        return jsonify({'error': 'Missing subject_id, level_id, topic_id or file'}), 400
+
+    try:
+        # read CSV
+        stream = io.StringIO(f.stream.read().decode('utf-8').replace('\u2011', '-'))
+        reader = csv.DictReader(stream)
+        inserted = 0
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            for idx, row in enumerate(reader, 1):
+                q_text = row.get('questions', '').strip()
+                if not q_text:
+                    print(f"[WARN] Row {idx}: Skipped empty question")
+                    continue
+
+                print(f"[INFO] Row {idx}: Inserting question '{q_text}'")
+
+                # 1) Insert question
+                q_json = json.dumps({'en': q_text})
+                cursor.execute("""
+                    INSERT INTO lifeapp.la_questions
+                      (title, la_subject_id, la_level_id, la_topic_id,
+                       created_by, question_type, `type`, status,
+                       created_at, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (
+                    q_json,
+                    subject_id,
+                    level_id,
+                    topic_id,
+                    1,  # created_by
+                    1,  # question_type = Text
+                    2,  # game_type = Quiz
+                    1,  # status = Active
+                    now,
+                    now
+                ))
+                qid = cursor.lastrowid
+
+                # 2) Insert options
+                answer_key = row.get('answer', '').strip().lower()
+                correct_idx = None
+                if answer_key.startswith('option'):
+                    try:
+                        correct_idx = int(answer_key.replace('option', '')) - 1
+                    except:
+                        print(f"[WARN] Row {idx}: Invalid answer format '{answer_key}'")
+
+                answer_option_id = None
+                for opt_idx, col in enumerate(['option1', 'option2', 'option3', 'option4']):
+                    txt = row.get(col, '').strip()
+                    opt_json = json.dumps({'en': txt})
+                    cursor.execute("""
+                        INSERT INTO lifeapp.la_question_options
+                          (question_id, title, created_at, updated_at)
+                        VALUES (%s,%s,%s,%s)
+                    """, (qid, opt_json, now, now))
+                    oid = cursor.lastrowid
+                    if correct_idx is not None and opt_idx == correct_idx:
+                        answer_option_id = oid
+
+                # 3) Link correct answer
+                if answer_option_id:
+                    cursor.execute("""
+                        UPDATE lifeapp.la_questions
+                           SET answer_option_id = %s
+                         WHERE id = %s
+                    """, (answer_option_id, qid))
+                    print(f"[INFO] Row {idx}: Linked correct option ID {answer_option_id}")
+
+                inserted += 1
+
+            conn.commit()
+            print(f"[SUCCESS] Inserted {inserted} questions successfully.")
+            return jsonify({'success': True, 'inserted': inserted}), 200
+
+    except Exception as e:
+        print(f"[ERROR] Exception occurred: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+        print("[INFO] Database connection closed.")
+
     subject_id = request.form.get('subject_id')
     level_id   = request.form.get('level_id')
     topic_id   = request.form.get('topic_id')
