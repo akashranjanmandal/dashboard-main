@@ -3029,28 +3029,48 @@ def update_vision_session_score(answer_id):
 def update_vision_session_status(answer_id):
     data = request.get_json() or {}
     new_status = data.get('status')
-    if new_status not in ('approved','rejected'):
+    if new_status not in ('accepted','rejected'):
         return jsonify({'error':'Invalid status'}), 400
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    if new_status == 'approved':
+    if new_status == 'accepted':
         sql = "UPDATE vision_question_answers SET status=%s, approved_at=%s WHERE id=%s"
         params = (new_status, now, answer_id)
+        vision_status = 'completed'
     else:  # rejected
         sql = "UPDATE vision_question_answers SET status=%s, rejected_at=%s WHERE id=%s"
         params = (new_status, now, answer_id)
+        vision_status = 'rejected'
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
+            # Update vision_question_answers
             cursor.execute(sql, params)
+
+            # Get user_id and vision_id for status update
+            cursor.execute("SELECT user_id, vision_id FROM vision_question_answers WHERE id = %s", (answer_id,))
+            result = cursor.fetchone()
+            if not result:
+                return jsonify({'error': 'Vision answer not found'}), 404
+
+            user_id, vision_id = result
+
+            # Update or insert into vision_user_statuses
+            cursor.execute("""
+                INSERT INTO vision_user_statuses (user_id, vision_id, status, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE status = %s, updated_at = %s
+            """, (user_id, vision_id, vision_status, now, now, vision_status, now))
+
             conn.commit()
         return jsonify({'success': True}), 200
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
     finally:
         conn.close()
-
 ###################################################################################
 ###################################################################################
 ######################## STUDENT/ QUIZ SESSIONS APIs ##############################
