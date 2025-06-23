@@ -8,8 +8,8 @@ import { Download, Search, XCircle } from 'lucide-react';
 const inter = Inter({ subsets: ['latin'] });
 // const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
 // const api_startpoint = 'http://152.42.239.141:5000'
-const api_startpoint = 'http://127.0.0.1:5000'
-// const api_startpoint = 'http://152.42.239.141:5000'
+// const api_startpoint = 'http://127.0.0.1:5000'
+ const api_startpoint = 'http://152.42.239.141:5000'
 
 
 interface SessionRow {
