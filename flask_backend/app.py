@@ -3025,52 +3025,73 @@ def update_vision_session_score(answer_id):
     finally:
         conn.close()
 
+
 @app.route('/api/vision_sessions/<int:answer_id>/status', methods=['PUT'])
 def update_vision_session_status(answer_id):
     data = request.get_json() or {}
     new_status = data.get('status')
-    if new_status not in ('accepted','rejected'):
-        return jsonify({'error':'Invalid status'}), 400
+    print(f"Received status update request for answer_id={answer_id}, new_status={new_status}")
+
+    if new_status not in ('approved', 'rejected'):
+        print("❌ Invalid status")
+        return jsonify({'error': 'Invalid status'}), 400
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    if new_status == 'accepted':
+
+    if new_status == 'approved':
         sql = "UPDATE vision_question_answers SET status=%s, approved_at=%s WHERE id=%s"
         params = (new_status, now, answer_id)
-        vision_status = 'completed'
+        vision_user_status = 'completed'
     else:  # rejected
         sql = "UPDATE vision_question_answers SET status=%s, rejected_at=%s WHERE id=%s"
         params = (new_status, now, answer_id)
-        vision_status = 'rejected'
+        vision_user_status = 'rejected'
+
+    print(f"Executing SQL for vision_question_answers: {sql} with params: {params}")
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # Update vision_question_answers
+            # Step 1: Update vision_question_answers
             cursor.execute(sql, params)
+            print(f"✅ vision_question_answers updated for ID {answer_id}")
 
-            # Get user_id and vision_id for status update
+            # Step 2: Get user_id and vision_id
             cursor.execute("SELECT user_id, vision_id FROM vision_question_answers WHERE id = %s", (answer_id,))
             result = cursor.fetchone()
+            print(f"Fetched user_id and vision_id: {result}")
+
             if not result:
+                print("❌ Vision answer not found in DB")
                 return jsonify({'error': 'Vision answer not found'}), 404
 
-            user_id, vision_id = result
+            # ✅ FIX: Access values by key
+            user_id = result['user_id']
+            vision_id = result['vision_id']
 
-            # Update or insert into vision_user_statuses
-            cursor.execute("""
+            # Step 3: Update or insert into vision_user_statuses
+            status_sql = """
                 INSERT INTO vision_user_statuses (user_id, vision_id, status, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE status = %s, updated_at = %s
-            """, (user_id, vision_id, vision_status, now, now, vision_status, now))
+            """
+            print(f"Executing vision_user_statuses update: {vision_user_status}")
+            cursor.execute(status_sql, (
+                user_id, vision_id, vision_user_status, now, now, vision_user_status, now
+            ))
 
             conn.commit()
-        return jsonify({'success': True}), 200
+            print("✅ Commit successful")
+            return jsonify({'success': True, 'status': vision_user_status}), 200
 
     except Exception as e:
+        print(f"❌ Exception: {e}")
         return jsonify({'error': str(e)}), 500
 
     finally:
         conn.close()
+        print("🔚 Connection closed")
+
 ###################################################################################
 ###################################################################################
 ######################## STUDENT/ QUIZ SESSIONS APIs ##############################
