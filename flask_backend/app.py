@@ -40,13 +40,13 @@ load_dotenv()
 #         cursorclass=pymysql.cursors.DictCursor
 #     )
 
+
 # DigitalOcean Spaces Config
 DO_SPACES_KEY = os.getenv('DO_SPACES_KEY')
 DO_SPACES_SECRET = os.getenv('DO_SPACES_SECRET')
 DO_SPACES_REGION = os.getenv('DO_SPACES_REGION')
 DO_SPACES_BUCKET = os.getenv('DO_SPACES_BUCKET')
 DO_SPACES_ENDPOINT = os.getenv('DO_SPACES_ENDPOINT')
-
 
 # Initialize Boto3 Client
 # s3_client = boto3.client(
@@ -6521,7 +6521,7 @@ def add_mission():
                 INSERT INTO lifeapp.la_missions
                   (la_subject_id, la_level_id, type, allow_for,
                    title, description, question,
-                   image, document, index,
+                   image, document, `index`,
                    created_at, updated_at, status)
                 VALUES
                   (%s, %s, %s, %s,
@@ -6552,10 +6552,9 @@ def add_mission():
                     logging.info(f"Uploaded document {idx}: {file.filename} with ID: {media['id']}")
                     cursor.execute("""
                         INSERT INTO lifeapp.la_mission_resources
-                          (la_mission_id, title, media_id, index, created_at, updated_at, locale)
+                          (la_mission_id, title, media_id, `index`, created_at, updated_at, locale)
                         VALUES (%s, %s, %s, %s, NOW(), NOW(), %s)
                     """, (mission_id, file.filename, media['id'], idx, 'en'))
-
             connection.commit()
             logging.info("Transaction committed successfully")
             return jsonify({"id": mission_id}), 201
@@ -6566,6 +6565,7 @@ def add_mission():
     finally:
         connection.close()
         logging.info("Database connection closed")
+
 @app.route('/api/delete_mission', methods=['POST'])
 def delete_mission():
     try:
@@ -9239,51 +9239,38 @@ def list_campaigns():
             # 2) paginated fetch with conditional joins
             sql = """
             SELECT
-              c.id,
-              c.game_type,
-              CASE 
-                WHEN c.game_type = 1
-                    THEN 'Mission'
-                WHEN c.game_type = 2
-                    THEN 'Quiz'
-                ELSE 'Vision'
-              END AS game_type_title,
-              c.reference_id,
-
-              -- pull the right title from the right table:
-              COALESCE(
-                JSON_UNQUOTE(JSON_EXTRACT(m.title, '$.en')),                -- mission title
-                JSON_UNQUOTE(JSON_EXTRACT(q.title, '$.en')),                -- quiz question title
-                JSON_UNQUOTE(JSON_EXTRACT(v.title,'$.en'))  -- vision title (your JSON column)
-              ) AS reference_title,
-
-              c.title        AS campaign_title,
-              c.description,
-              c.scheduled_for,
-              c.created_at,
-              c.updated_at
-            FROM la_campaigns c
-
-            -- only join missions when game_type=1
-            LEFT JOIN lifeapp.la_missions m
-              ON c.game_type = 1
-             AND m.id        = c.reference_id
-
-            -- only join quiz questions when game_type=2
-            LEFT JOIN lifeapp.la_questions q
-              ON c.game_type = 2
-             AND q.id        = c.reference_id
-
-            -- only join visions when game_type=7
-            LEFT JOIN lifeapp.visions v
-              ON c.game_type = 7
-             AND v.id        = c.reference_id
-
-            ORDER BY c.scheduled_for DESC
-            LIMIT %s OFFSET %s
+                c.id,
+                c.game_type,
+                CASE 
+                    WHEN c.game_type = 1 THEN 'Mission'
+                    WHEN c.game_type = 2 THEN 'Quiz'
+                    ELSE 'Vision'
+                END AS game_type_title,
+                c.reference_id,
+                COALESCE(
+                    JSON_UNQUOTE(JSON_EXTRACT(m.title, '$.en')),
+                    JSON_UNQUOTE(JSON_EXTRACT(q.title, '$.en')),
+                    JSON_UNQUOTE(JSON_EXTRACT(v.title, '$.en'))
+                ) AS reference_title,
+                c.title        AS campaign_title,
+                c.description,
+                c.scheduled_for,
+                c.created_at,
+                c.updated_at,
+                media.path AS image_path
+                FROM la_campaigns c
+                LEFT JOIN lifeapp.la_missions m ON c.game_type = 1 AND m.id = c.reference_id
+                LEFT JOIN lifeapp.la_questions q ON c.game_type = 2 AND q.id = c.reference_id
+                LEFT JOIN lifeapp.visions v ON c.game_type = 7 AND v.id = c.reference_id
+                LEFT JOIN lifeapp.media media ON media.id = c.media_id
+                ORDER BY c.scheduled_for DESC
+                LIMIT %s OFFSET %s
             """
             cursor.execute(sql, (per_page, offset))
             camps = cursor.fetchall()
+            base_url = os.getenv('BASE_URL', '')
+            for c in camps:
+                c['image_url'] = f"{base_url}/{c['image_path']}" if c.get('image_path') else None
 
         return jsonify({
             'page': page,
@@ -9295,60 +9282,102 @@ def list_campaigns():
     finally:
         conn.close()
 
-
 @app.route('/api/campaigns', methods=['POST'])
 def create_campaign():
-    data = request.get_json() or {}
-    sql = """
-        INSERT INTO lifeapp.la_campaigns
-          (game_type, reference_id, title, description, scheduled_for, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
-    """
-    params = (
-        data['game_type'],
-        data['reference_id'],
-        data['title'],
-        data['description'],
-        data['scheduled_for']
-    )
-    conn = get_db_connection()
+    logger.info("📥 [POST] Create campaign form: %s", dict(request.form))
+    conn = None
+
     try:
+        form = request.form
+        game_type     = form.get('game_type')
+        reference_id  = form.get('reference_id')
+        title         = form.get('title') or form.get('campaign_title')
+        description   = form.get('description')
+        scheduled_for = form.get('scheduled_for')
+
+        media_id = None
+        image_file = request.files.get('image')
+
+        if image_file and image_file.filename:
+            logger.info(f"📷 Uploading image: {image_file.filename}")
+            media = upload_media(image_file)
+            media_id = media['id']
+
+        sql = """
+            INSERT INTO lifeapp.la_campaigns
+              (game_type, reference_id, title, description, scheduled_for, media_id, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+        """
+        params = (game_type, reference_id, title, description, scheduled_for, media_id)
+
+        conn = get_db_connection()
         with conn.cursor() as cursor:
             cursor.execute(sql, params)
             conn.commit()
+            logger.info("✅ Campaign created with ID %s", cursor.lastrowid)
             return jsonify({'id': cursor.lastrowid}), 201
+
+    except Exception as e:
+        logger.error("🔥 Error in POST /campaigns: %s", e)
+        return jsonify({'error': str(e)}), 500
+
     finally:
-        conn.close()
+        if conn:
+            conn.close()
+
 
 @app.route('/api/campaigns/<int:id>', methods=['PUT'])
 def update_campaign(id):
-    data = request.get_json() or {}
-    sql = """
-      UPDATE lifeapp.la_campaigns
-         SET game_type=%s,
-             reference_id=%s,
-             title=%s,
-             description=%s,
-             scheduled_for=%s,
-             updated_at=NOW()
-       WHERE id=%s
-    """
-    params = (
-        data['game_type'],
-        data['reference_id'],
-        data['title'],
-        data['description'],
-        data['scheduled_for'],
-        id
-    )
-    conn = get_db_connection()
+    logger.info("✏️ [PUT] Update campaign ID %s: %s", id, dict(request.form))
+    conn = None
+
     try:
+        form = request.form
+        game_type     = form.get('game_type')
+        reference_id  = form.get('reference_id')
+        title         = form.get('title') or form.get('campaign_title')
+        description   = form.get('description')
+        scheduled_for = form.get('scheduled_for')
+
+        media_id = None
+        image_file = request.files.get('image')
+        if image_file and image_file.filename:
+            logger.info(f"📷 Uploading updated image: {image_file.filename}")
+            media = upload_media(image_file)
+            media_id = media['id']
+
+        sql = """
+            UPDATE lifeapp.la_campaigns
+               SET game_type     = %s,
+                   reference_id  = %s,
+                   title         = %s,
+                   description   = %s,
+                   scheduled_for = %s,
+        """
+        params = [game_type, reference_id, title, description, scheduled_for]
+
+        if media_id:
+            sql += " media_id = %s,"
+            params.append(media_id)
+
+        sql += " updated_at = NOW() WHERE id = %s"
+        params.append(id)
+
+        conn = get_db_connection()
         with conn.cursor() as cursor:
-            cursor.execute(sql, params)
+            cursor.execute(sql, tuple(params))
             conn.commit()
-        return jsonify({'success': True}), 200
+            logger.info("✅ Campaign ID %s updated", id)
+            return jsonify({'success': True}), 200
+
+    except Exception as e:
+        logger.error("🔥 Error in PUT /campaigns/%s: %s", id, e)
+        return jsonify({'error': str(e)}), 500
+
     finally:
-        conn.close()
+        if conn:
+            conn.close()
+
 
 @app.route('/api/campaigns/<int:id>', methods=['DELETE'])
 def delete_campaign(id):
