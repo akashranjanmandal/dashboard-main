@@ -6402,12 +6402,13 @@ def get_missions_resource():
                     lam.la_level_id   AS level_id,
                     lal.title         AS level,
                     lam.status        AS status,
+                    lam.index       AS mission_index,
                     JSON_UNQUOTE(JSON_EXTRACT(lam.image, '$.en'))         AS image_id,
                     mimg.path         AS image_path,
                     lamr.id 		  AS resource_id,
                     document.id       AS media_id,
                     document.path     AS resource_path,
-                    lamr.`index`      AS idx
+                    lamr.index      AS idx
                 FROM lifeapp.la_missions lam
                 JOIN lifeapp.la_subjects las ON las.id = lam.la_subject_id
                 JOIN lifeapp.la_levels   lal ON lal.id = lam.la_level_id
@@ -6418,7 +6419,7 @@ def get_missions_resource():
             """
 
             params = []
-            
+
             if filters.get('status'):
                 base_query += " AND lam.status = %s"
                 params.append(filters['status'])
@@ -6426,22 +6427,17 @@ def get_missions_resource():
                 base_query += " AND lam.type = %s"
                 params.append(filters['type'])
             if filters.get('subject'):
-                # Match subject ID instead of title
                 base_query += " AND lam.la_subject_id = %s"
                 params.append(filters['subject'])
             if filters.get('level'):
-                # Match level ID instead of title
                 base_query += " AND lam.la_level_id = %s"
                 params.append(filters['level'])
 
-             # Order by mission then resource index
-            base_query += " ORDER BY lam.id, lamr.`index`"
+            base_query += " ORDER BY lam.id, lamr.index"
             cursor.execute(base_query, params)
-            rows = cursor.fetchall() 
-            # cursor.execute(base_query, params)
-            # data = cursor.fetchall()
-            # Build full URLs
-            base_url = os.getenv('BASE_URL', '')  # e.g. 'https://cdn.example.com'
+            rows = cursor.fetchall()
+
+            base_url = os.getenv('BASE_URL', '')
             missions = {}
             for row in rows:
                 mid = row['id']
@@ -6458,11 +6454,11 @@ def get_missions_resource():
                         'level_id':     row['level_id'],
                         'level':        row['level'],
                         'status':       row['status'],
+                        'index':        row['mission_index'], 
                         'image_id':     row['image_id'],
                         'image_url':    f"{base_url}/{row['image_path']}" if row.get('image_path') else None,
                         'resources':    []
                     }
-                # Append resource if exists
                 if row.get('resource_id'):
                     missions[mid]['resources'].append({
                         'resource_id': row['resource_id'],
@@ -6476,12 +6472,17 @@ def get_missions_resource():
     finally:
         connection.close()
 
+
 @app.route('/api/add_mission', methods=['POST'])
 def add_mission():
     try:
+        logging.info("===== STARTING ADD MISSION REQUEST =====")
         connection = get_db_connection()
         with connection.cursor() as cursor:
             form = request.form
+            files = request.files
+            logging.info(f"Form data received: {form}")
+            logging.info(f"Files received: {files}")
 
             # Read normal fields
             subject    = form.get('subject')
@@ -6492,71 +6493,79 @@ def add_mission():
             raw_title  = form.get('title', '')
             raw_desc   = form.get('description', '')
             raw_ques   = form.get('question', '')
+            index_value = int(form.get('index', 1))
 
-            # Wrap text fields inside {"en": "text"}
-            title_json       = json.dumps({"en": raw_title})
+            logging.info(f"Parsed values - Subject: {subject}, Level: {level}, Type: {type_id}")
+            logging.info(f"Title: {raw_title}, Description: {raw_desc}, Question: {raw_ques}")
+            logging.info(f"Index: {index_value}, Status: {status}")
+
+            # Wrap text fields
+            title_json = json.dumps({"en": raw_title})
             description_json = json.dumps({"en": raw_desc})
-            question_json    = json.dumps({"en": raw_ques})
-
-            # Initialize
-            image_json = None
-            document_json = None
+            question_json = json.dumps({"en": raw_ques})
+            logging.debug(f"JSON wrapped title: {title_json}")
 
             # Handle image upload
+            image_json = None
             image_file = request.files.get('image')
             if image_file and image_file.filename:
+                logging.info("Processing image upload")
                 media = upload_media(image_file)
                 image_json = json.dumps({"en": media['id']})
+                logging.info(f"Image uploaded with ID: {media['id']}")
 
-            # Handle document upload
-            # doc_file = request.files.get('document')
-            # if doc_file and doc_file.filename:
-            #     media = upload_media(doc_file)
             document_json = json.dumps({"en": None})
 
             # Prepare SQL
             sql = """
                 INSERT INTO lifeapp.la_missions
-                  (la_subject_id, la_level_id, `type`, allow_for,
+                  (la_subject_id, la_level_id, type, allow_for,
                    title, description, question,
-                   image, document,
+                   image, document, index,
                    created_at, updated_at, status)
                 VALUES
                   (%s, %s, %s, %s,
                    %s, %s, %s,
-                   %s, %s,
+                   %s, %s, %s,
                    NOW(), NOW(), %s)
             """
             params = (
                 subject, level, type_id, allow_for,
                 title_json, description_json, question_json,
                 image_json, document_json,
+                index_value,
                 status
             )
 
+            logging.info("Executing SQL insert")
             cursor.execute(sql, params)
             mission_id = cursor.lastrowid
+            logging.info(f"Mission created with ID: {mission_id}")
 
+            # Handle document uploads
             files = request.files.getlist('documents')
-            for idx, file in enumerate(files[:4], start=1):
-                media = upload_media(file)
-                cursor.execute("""
-                    INSERT INTO lifeapp.la_mission_resources
-                      (la_mission_id, title, media_id, `index`, created_at, updated_at, locale)
-                    VALUES (%s, %s, %s, %s, NOW(), NOW(), %s)
-                """, (mission_id, file.filename, media['id'], idx, 'en'))
-
+            logging.info(f"Processing {len(files)} document uploads")
             
-            connection.commit()
+            for idx, file in enumerate(files[:4], start=1):
+                if file and file.filename:
+                    media = upload_media(file)
+                    logging.info(f"Uploaded document {idx}: {file.filename} with ID: {media['id']}")
+                    cursor.execute("""
+                        INSERT INTO lifeapp.la_mission_resources
+                          (la_mission_id, title, media_id, index, created_at, updated_at, locale)
+                        VALUES (%s, %s, %s, %s, NOW(), NOW(), %s)
+                    """, (mission_id, file.filename, media['id'], idx, 'en'))
 
+            connection.commit()
+            logging.info("Transaction committed successfully")
             return jsonify({"id": mission_id}), 201
 
     except Exception as e:
+        logging.error(f"Error in add_mission: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
     finally:
         connection.close()
-
-
+        logging.info("Database connection closed")
 @app.route('/api/delete_mission', methods=['POST'])
 def delete_mission():
     try:
@@ -6618,122 +6627,131 @@ def delete_mission():
 @app.route('/api/update_mission', methods=['POST'])
 def update_mission():
     try:
+        logging.info("===== STARTING UPDATE MISSION REQUEST =====")
         connection = get_db_connection()
         with connection.cursor() as cursor:
             form = request.form
+            files = request.files
+            logging.info(f"Form data received: {form}")
+            logging.info(f"Files received: {files}")
 
             # Read normal fields
             mission_id = form.get('id')
-            subject    = form.get('subject')
-            level      = form.get('level')
-            type_id    = form.get('type')
-            allow_for  = form.get('allow_for')
-            status     = int(form.get('status', 0))
-            raw_title  = form.get('title', '')
-            raw_desc   = form.get('description', '')
-            raw_ques   = form.get('question', '')
+            subject = form.get('subject')
+            level = form.get('level')
+            type_id = form.get('type')
+            allow_for = form.get('allow_for')
+            status = int(form.get('status', 0))
+            raw_title = form.get('title', '')
+            raw_desc = form.get('description', '')
+            raw_ques = form.get('question', '')
+            index_value = form.get('index', default=1, type=int)
+
+            logging.info(f"Updating mission ID: {mission_id}")
+            logging.info(f"New values - Subject: {subject}, Level: {level}, Type: {type_id}")
+            logging.info(f"Title: {raw_title}, Description: {raw_desc}, Question: {raw_ques}")
+            logging.info(f"Index: {index_value}, Status: {status}")
 
             # Wrap text fields
-            title_json       = json.dumps({"en": raw_title})
+            title_json = json.dumps({"en": raw_title})
             description_json = json.dumps({"en": raw_desc})
-            question_json    = json.dumps({"en": raw_ques})
+            question_json = json.dumps({"en": raw_ques})
 
-            # 2) Fetch old image_id so we can delete it if replaced
+            # Get old image
             cursor.execute(
-              "SELECT image FROM lifeapp.la_missions WHERE id = %s", (mission_id,)
+                "SELECT image FROM lifeapp.la_missions WHERE id = %s", (mission_id,)
             )
             old_img = cursor.fetchone().get('image')
-            # # Handle image upload
-            # image_file = request.files.get('image')
-            # if image_file:
-            #     media = upload_media(image_file)
-            #     image_json = json.dumps({"en": media['id']})
-            # else:
-            #     image_json = json.dumps({"en": None})
-
-            # # Handle document upload
-            # doc_file = request.files.get('document')
-            # if doc_file:
-            #     media = upload_media(doc_file)
-            #     document_json = json.dumps({"en": media['id']})
-            # else:
-            #     document_json = json.dumps({"en": None})
+            logging.info(f"Old image reference: {old_img}")
 
             # Build dynamic UPDATE SQL
             update_sql = """
-                UPDATE lifeapp.la_missions
-                SET
-                  la_subject_id = %s,
-                  la_level_id   = %s,
-                  `type`        = %s,
-                  allow_for     = %s,
-                  title         = %s,
-                  description   = %s,
-                  question      = %s,
-                  status        = %s,
-                  updated_at    = NOW()
-            """
+    UPDATE lifeapp.la_missions
+    SET
+      la_subject_id = %s,
+      la_level_id   = %s,
+      `type`        = %s,
+      allow_for     = %s,
+      title         = %s,
+      description   = %s,
+      question      = %s,
+      status        = %s,
+      `index`       = %s,
+      updated_at    = NOW()
+      """
             params = [
                 subject, level, type_id, allow_for,
                 title_json, description_json, question_json,
-                status
+                status, index_value,
             ]
 
-            # Only add image/document if provided
-            # Conditionally overwrite only if a new file arrives
+            # Handle image upload if provided
             image_file = request.files.get('image')
             if image_file and image_file.filename:
+                logging.info("Processing new image upload")
                 media = upload_media(image_file)
                 update_sql += ", image = %s"
                 params.append(json.dumps({'en': media['id']}))
-                if old_img:
-                    cursor.execute("DELETE FROM lifeapp.media WHERE id = JSON_UNQUOTE(JSON_EXTRACT(%s, '$.en'))", (old_img,))
+                logging.info(f"New image ID: {media['id']}")
 
+                if old_img:
+                    logging.info("Deleting old image")
+                    cursor.execute("DELETE FROM lifeapp.media WHERE id = JSON_UNQUOTE(JSON_EXTRACT(%s, '$.en'))", (old_img,))
 
             update_sql += " WHERE id = %s"
             params.append(mission_id)
+            logging.info(f"Final update query: {update_sql}")
+            logging.info(f"Query params: {params}")
 
             cursor.execute(update_sql, tuple(params))
+            logging.info("Mission data updated successfully")
 
-            # doc_file = request.files.get('document')
-            # if doc_file and doc_file.filename:
-            #     media = upload_media(doc_file)
-            #     update_sql += ", document = %s"
-            #     params.append(json.dumps({'en': media['id']}))
-
+            # Handle document uploads
             files = request.files.getlist('documents')
             if files:
-                # fetch & delete old document media
+                logging.info(f"Processing {len(files)} document updates")
+                
+                # Delete old documents
                 cursor.execute(
-                  "SELECT media_id FROM lifeapp.la_mission_resources WHERE la_mission_id = %s",
-                  (mission_id,)
+                    "SELECT media_id FROM lifeapp.la_mission_resources WHERE la_mission_id = %s",
+                    (mission_id,)
                 )
-                for row in cursor.fetchall():
+                old_resources = cursor.fetchall()
+                logging.info(f"Found {len(old_resources)} old resources to delete")
+                
+                for row in old_resources:
                     old_res_mid = row.get('media_id')
                     if old_res_mid:
+                        logging.info(f"Deleting old resource media ID: {old_res_mid}")
                         cursor.execute("DELETE FROM lifeapp.media WHERE id = %s", (old_res_mid,))
-                # delete old resource rows
+
                 cursor.execute(
-                  "DELETE FROM lifeapp.la_mission_resources WHERE la_mission_id = %s",
-                  (mission_id,)
+                    "DELETE FROM lifeapp.la_mission_resources WHERE la_mission_id = %s",
+                    (mission_id,)
                 )
-                # insert new ones
+                logging.info("Old resource references deleted")
+
+                # Add new documents
                 for idx, file in enumerate(files[:4], start=1):
-                    media = upload_media(file)
-                    cursor.execute("""
-                        INSERT INTO lifeapp.la_mission_resources
-                          (la_mission_id, title, media_id, `index`, created_at, updated_at, locale)
-                        VALUES (%s, %s, %s, %s, NOW(), NOW(), 'en')
-                    """, (mission_id, file.filename, media['id'], idx))
+                    if file and file.filename:
+                        media = upload_media(file)
+                        logging.info(f"Adding new document {idx}: {file.filename} with ID: {media['id']}")
+                        cursor.execute("""
+                            INSERT INTO lifeapp.la_mission_resources
+                              (la_mission_id, title, media_id, index, created_at, updated_at, locale)
+                            VALUES (%s, %s, %s, %s, NOW(), NOW(), 'en')
+                        """, (mission_id, file.filename, media['id'], idx))
 
             connection.commit()
-
+            logging.info("Transaction committed successfully")
             return jsonify({"success": True}), 200
 
     except Exception as e:
+        logging.error(f"Error in update_mission: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
     finally:
         connection.close()
+        logging.info("Database connection closed")
 
 ###################################################################################
 ###################################################################################
@@ -7438,6 +7456,7 @@ def fetch_visions():
             sql = """
             SELECT
               v.id            AS vision_id,
+              v.index         AS idx,
               JSON_UNQUOTE(JSON_EXTRACT(v.title,'$.en'))       AS title,
               JSON_UNQUOTE(JSON_EXTRACT(v.description,'$.en')) AS description,
               v.youtube_url,
@@ -7482,6 +7501,7 @@ def fetch_visions():
                       'subject':     r['subject'],
                       'level':       r['level'],
                       'status':      r['status'],
+                      'index':      r['idx'],
                       'questions': []
                     }
                 # append each question
@@ -7503,16 +7523,21 @@ def fetch_visions():
 @app.route('/api/visions', methods=['POST'])
 def add_vision():
     data = request.get_json() or {}
+    print("📥 [ADD] Incoming Vision Payload:", json.dumps(data, indent=2))
+
     required = ['title','description','allow_for','subject_id','level_id','status','questions']
     for f in required:
         if f not in data:
+            print(f"❌ [ADD] Missing field: {f}")
             return jsonify({'error': f'Missing field {f}'}), 400
 
+    print("✅ [ADD] All required fields present")
+    print("🔢 [ADD] Index received:", data.get('index'))
+
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    # vision fields
     vsql = """INSERT INTO lifeapp.visions
-      (title,description,youtube_url,allow_for,la_subject_id,la_level_id,status,created_at,updated_at)
-      VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
+      (title,description,youtube_url,allow_for,la_subject_id,la_level_id,status,created_at,updated_at,`index`)
+      VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
     vparams = (
       json.dumps({'en':data['title']}),
       json.dumps({'en':data['description']}),
@@ -7521,16 +7546,19 @@ def add_vision():
       data['subject_id'],
       data['level_id'],
       int(data['status']),
-      now, now
+      now, now,
+      int(data.get('index', 1))
     )
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
+            print("🚀 [ADD] Inserting Vision...")
             cur.execute(vsql, vparams)
             vid = cur.lastrowid
+            print("✅ [ADD] Vision inserted with ID:", vid)
 
-            # insert each question object
-            for q in data['questions']:
+            for i, q in enumerate(data['questions']):
+                print(f"📘 [ADD] Inserting Question {i+1}: Type={q['question_type']}")
                 qsql = """INSERT INTO lifeapp.vision_questions
                   (vision_id,question,question_type,options,correct_answer,created_at,updated_at)
                   VALUES(%s,%s,%s,%s,%s,%s,%s)"""
@@ -7545,8 +7573,10 @@ def add_vision():
                 cur.execute(qsql, qparams)
 
             conn.commit()
+            print("🎉 [ADD] All questions saved")
             return jsonify({'vision_id': vid}), 201
     except Exception as e:
+        print("🔥 [ADD] Error:", str(e))
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
@@ -7555,7 +7585,8 @@ def add_vision():
 @app.route('/api/visions/<int:vision_id>', methods=['PUT'])
 def update_vision(vision_id):
     data = request.get_json() or {}
-    # ensure all required fields are present
+    print(f"📥 [EDIT] Vision ID {vision_id} Payload:", json.dumps(data, indent=2))
+
     required = [
         'title','description','youtube_url',
         'allow_for','subject_id','level_id','status',
@@ -7563,13 +7594,17 @@ def update_vision(vision_id):
     ]
     for f in required:
         if f not in data:
+            print(f"❌ [EDIT] Missing field: {f}")
             return jsonify({'error': f'Missing field {f}'}), 400
+
+    print("✅ [EDIT] All required fields present")
+    print(f"🔢 [EDIT] Index received: {data.get('index')} for Vision ID {vision_id}")
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # 1) update the parent vision row
+            print("🛠️ [EDIT] Updating vision row...")
             cursor.execute("""
                 UPDATE lifeapp.visions
                 SET
@@ -7580,7 +7615,8 @@ def update_vision(vision_id):
                   la_subject_id = %s,
                   la_level_id   = %s,
                   status        = %s,
-                  updated_at    = %s
+                  updated_at    = %s,
+                  `index`       = %s
                 WHERE id = %s
             """, (
                 json.dumps({'en': data['title']}),
@@ -7591,17 +7627,16 @@ def update_vision(vision_id):
                 data['level_id'],
                 int(data['status']),
                 now,
+                int(data.get('index', 1)),
                 vision_id
             ))
 
-            # 2) remove *all* existing questions for this vision
-            cursor.execute(
-                "DELETE FROM lifeapp.vision_questions WHERE vision_id = %s",
-                (vision_id,)
-            )
+            print("🧹 [EDIT] Deleting existing questions for vision...")
+            cursor.execute("DELETE FROM lifeapp.vision_questions WHERE vision_id = %s", (vision_id,))
+            print("✅ [EDIT] Existing questions removed")
 
-            # 3) re‑insert exactly the questions array from the payload
-            for q in data['questions']:
+            for i, q in enumerate(data['questions']):
+                print(f"📘 [EDIT] Inserting Question {i+1}: Type={q['question_type']}")
                 cursor.execute("""
                     INSERT INTO lifeapp.vision_questions
                       (vision_id, question, question_type,
@@ -7618,11 +7653,12 @@ def update_vision(vision_id):
                 ))
 
             conn.commit()
+            print(f"🎉 [EDIT] Vision ID {vision_id} updated successfully")
             return jsonify({'success': True}), 200
 
     except Exception as e:
+        print("🔥 [EDIT] Error:", str(e))
         return jsonify({'error': str(e)}), 500
-
     finally:
         conn.close()
 
