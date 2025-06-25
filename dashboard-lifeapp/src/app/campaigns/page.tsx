@@ -13,10 +13,7 @@ import AddCampaignModal from './AddCampaignModal';  // import only
 const inter = Inter({ subsets: ['latin'] });
 //const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
 const api_startpoint = 'http://152.42.239.141:5000'
-// const api_startpoint = 'http://152.42.239.141:5000'
-
-
-
+// const api_startpoint = 'http://127.0.0.1:5000'
 interface Campaign {
   id: number;
   game_type: number;
@@ -25,6 +22,7 @@ interface Campaign {
   reference_title: string;
   campaign_title: string;
   description: string;
+  image_url?: string;
   scheduled_for: string;
   created_at: string;
   updated_at: string;
@@ -93,7 +91,7 @@ export default function Campaigns() {
                 <table className="table table-striped table-hover">
                   <thead>
                     <tr>
-                    {['ID','Type', 'Ref Title','Title','Desc','Scheduled','Created','Updated','Actions']
+                    {['ID','Type',  'Image','Ref Title','Title','Desc','Scheduled','Created','Updated','Actions']
                   .map(h => <th key={h}>{h}</th>)}
                     </tr>
                   </thead>
@@ -102,6 +100,7 @@ export default function Campaigns() {
                       <tr key={c.id} className="h-12">
                         <td className="overflow-hidden whitespace-nowrap text-ellipsis">{c.id}</td>
                         <td className="overflow-hidden whitespace-nowrap text-ellipsis">{c.game_type_title}</td>
+                        <td style={{ width: 72 }}>{c.image_url ? <img src={c.image_url}className="h-10 w-10 object-cover rounded"loading="lazy" />: <span className="text-muted">—</span>}</td>
                         {/* <td className="overflow-hidden whitespace-nowrap text-ellipsis">{c.reference_id}</td> */}
                         <td className="overflow-hidden whitespace-nowrap text-ellipsis">{c.reference_title}</td>
                         <td className="overflow-hidden whitespace-nowrap text-ellipsis">{c.campaign_title}</td>
