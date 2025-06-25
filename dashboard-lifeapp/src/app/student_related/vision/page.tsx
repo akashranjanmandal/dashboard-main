@@ -8,12 +8,8 @@ import { IconEdit, IconPlus, IconTrash } from '@tabler/icons-react';
 import Papa from 'papaparse';
 const inter = Inter({ subsets: ['latin'] });
 // const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
+// const api_startpoint = 'http://127.0.0.1:5000'
 const api_startpoint = 'http://152.42.239.141:5000'
-
-// const api_startpoint = 'http://152.42.239.141:5000'
-
-
-
 
 interface ModalProps {
     mode: 'add' | 'edit';
@@ -87,7 +83,7 @@ const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     skipEmptyLines: true,
   });
 };
-  
+    const [index, setIndex] = useState<number>(initial?.index || 1);
   // Reflection/Image question
   const initialSingle = isEdit
     ? initial?.questions.find(q => q.question_type !== 'mcq')?.question ?? ''
@@ -170,6 +166,7 @@ const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       subject_id:  subj,
       level_id:    lvl,
       status:      stat,
+      index: Number(index) || 1,
       questions
     };
 
@@ -229,7 +226,15 @@ console.log(payload)
           <option value="1">Active</option>
           <option value="0">Inactive</option>
         </select>
-
+         <label className="block mb-2">Index Position</label>
+                    <input
+                        type="number"
+                        min="1"
+                        value={index}
+                        onChange={(e) => setIndex(Number(e.target.value))}
+                        className="w-full border p-2 rounded"
+                        placeholder="Enter index position"
+                    />
         <select value={questionType} onChange={e=>setQuestionType(e.target.value as any)} className="w-full border p-2 rounded mb-4">
           <option value="mcq">MCQ</option>
           <option value="reflection">Reflection</option>
@@ -374,6 +379,7 @@ interface VisionRow {
     level: string
     level_id?:string
     status: number
+    index?: number
     questions: QuestionPayload[]
 }
 
@@ -519,6 +525,7 @@ export default function VisionsPage() {
                                 <th className="p-2 border">Level</th>
                                 <th className="p-2 border">Status</th>
                                 <th className='p-2 border'>Details</th>
+                                <th className="p-2 border">Index</th>
                                 <th className="p-2 border">Actions</th>
                                 </tr>
                             </thead>
@@ -548,6 +555,7 @@ export default function VisionsPage() {
                                           {expanded[r.vision_id] ? 'Hide Details' : 'Show Details'}
                                         </button>
                                       </td>
+                                      <td className="p-2 border">{r.index || '-'}</td> 
                                       <td className="p-2 border flex gap-2 justify-center">
                                         {/* Edit/Delete icons */}
                                         <IconEdit onClick={() => { setEditRow(r); setShowEdit(true);} }
@@ -559,7 +567,7 @@ export default function VisionsPage() {
                                                 className="text-red-600"/>
                                       </td>
                                     </tr>
-
+                                        
                                       {expanded[r.vision_id] && (
                                         <tr>
                                           <td colSpan={5} className="bg-gray-50 p-4">
