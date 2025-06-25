@@ -8,11 +8,22 @@ import { IconEdit, IconPlus, IconTrash } from '@tabler/icons-react';
 import { ChevronDown } from 'lucide-react';
 
 import { IconLoader2 } from '@tabler/icons-react';
-
+// Add this right after your imports
+const safeJsonParse = (jsonString: string | null, defaultValue: any = '') => {
+  if (!jsonString) return defaultValue;
+  try {
+    const parsed = JSON.parse(jsonString);
+    return parsed.en || defaultValue;
+  } catch (e) {
+    return jsonString || defaultValue;
+  }
+};
 const inter = Inter({ subsets: ['latin'] });
 // const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
 const api_startpoint = 'http://152.42.239.141:5000'
-// const api_startpoint = 'http://152.42.239.141:5000'
+
+// const api_startpoint = 'http://127.0.0.1:5000'
+
 
 
 interface Resource { resource_id: number; media_id: number; url: string; }
@@ -28,6 +39,7 @@ interface Mission {
   level_id: number;
   level: string;
   status: number;
+ index?: number | null; 
   image_url?: string;
   resources?: Resource[];
 }
@@ -58,6 +70,7 @@ type EditData = {
   // from server
   image_url?: string;
   resources?: Resource[];
+  index?: number;
 };
 
 export default function StudentRelatedMission() {
@@ -85,6 +98,7 @@ export default function StudentRelatedMission() {
         title: '',
         description: '',
         question: '',
+        index: 0,
         image: null as File | null,
         documents: [] as File[],   // ← renamed
         status: ''
@@ -165,11 +179,11 @@ export default function StudentRelatedMission() {
         try {
           const fd = new FormData();
           // text fields
-          ['subject','level','type','allow_for','title','description','question','status']
-            .forEach(key => {
-              const val = (formData as any)[key];
-              if (val !== '') fd.append(key, val);
-            });
+          ['subject','level','type','allow_for','title','description','question','status','index']
+        .forEach(key => {
+          const val = (formData as any)[key];
+          if (val !== '') fd.append(key, val);
+        });
           // image
           if (formData.image) fd.append('image', formData.image);
           // documents (4)
@@ -254,7 +268,7 @@ export default function StudentRelatedMission() {
         try {
           const fd = new FormData();
           fd.append('id', editData.id.toString());
-          ['subject','level','type','allow_for','status','title','description','question']
+          ['subject','level','type','allow_for','status','title','description','question',"index"]
             .forEach(key => fd.append(key, (editData as any)[key]));
       
           if (editData.image instanceof File) {
@@ -423,6 +437,7 @@ export default function StudentRelatedMission() {
                                     <th className="p-2 border">Subject</th>
                                     <th className="p-2 border">Level</th>
                                     <th className="p-2 border">Status</th>
+                                    <th className="p-2 border">Index</th> 
                                     <th className="p-2 border">Actions</th>
                                     </tr>
                                 </thead>
@@ -430,9 +445,9 @@ export default function StudentRelatedMission() {
                                     {currentMissions.map((m) => (
                                     <tr key={m.id} className="text-sm">
                                         <td className="p-2 border">{m.id}</td>
-                                        <td className="p-2 border">{JSON.parse(m.title).en}</td>
-                                        <td className="p-2 border">{JSON.parse(m.description).en}</td>
-                                        <td className="p-2 border">{JSON.parse(m.question).en}</td>
+                                        <td className="p-2 border">{safeJsonParse(m.title)}</td>  {/* Updated */}
+                                        <td className="p-2 border">{safeJsonParse(m.description)}</td>  {/* Updated */}
+                                        <td className="p-2 border">{safeJsonParse(m.question)}</td>  {/* Updated */}
                                         <td className="p-2 border">
                                             {m.image_url
                                                 ? <img src={m.image_url!}
@@ -452,6 +467,7 @@ export default function StudentRelatedMission() {
                                                 </button>
                                             ) : '—'}
                                         </td>
+                                        
                                         <td className="p-2 border">
                                         {typeOptions.find(opt => opt.value === m.type)?.label ?? m.type.toString()}
                                         </td>
@@ -459,29 +475,27 @@ export default function StudentRelatedMission() {
                                         <td className="p-2 border">{JSON.parse(m.subject).en}</td>
                                         <td className="p-2 border">{JSON.parse(m.level).en}</td>
                                         <td className="p-2 border">{m.status == 1? 'Active': 'Inactive'}</td>
+                                        <td className="p-2 border">{m.index || '-'}</td> 
                                         <td className="p-2 border flex gap-2 justify-center">
                                             <div className=" ">
                                             <IconEdit className="text-blue-500 cursor-pointer" 
                                                 onClick={() => {
                                                     setEditData({
-                                                      id: m.id,
-                                                      title:       JSON.parse(m.title).en,
-                                                      description: JSON.parse(m.description).en,
-                                                      question:    JSON.parse(m.question).en,
-                                                      subject:     m.subject_id.toString(),
-                                                      level:       m.level_id.toString(),
-                                                      type:        m.type.toString(),
-                                                      allow_for:   m.allow_for === 'All' ? '1' : '2',
-                                                      status:      m.status.toString(),
-                                              
-                                                      // New upload slots left empty:
-                                                      image:       null,
-                                                      documents:   [],
-                                              
-                                                      // Existing values from API:
-                                                      image_url:   m.image_url,
-                                                      resources:   m.resources
-                                                    });
+    id: m.id,
+    title: safeJsonParse(m.title),  // Updated
+    description: safeJsonParse(m.description),  // Updated
+    question: safeJsonParse(m.question),  // Updated
+    subject: m.subject_id.toString(),
+    level: m.level_id.toString(),
+    type: m.type.toString(),
+    allow_for: m.allow_for === 'All' ? '1' : '2',
+    status: m.status.toString(),
+    index: m.index ||  1,
+    image: null,
+    documents: [],
+    image_url: m.image_url,
+    resources: m.resources
+});
                                                     setShowEditModal(true);
                                                 }}
                                             />
@@ -571,7 +585,19 @@ export default function StudentRelatedMission() {
                                         <option value="1">Active</option>
                                         <option value="0">Inactive</option>
                                     </select>
-
+{/* Add this after the status field but before the title field */}
+<label className="block mt-2">Index</label>
+<input 
+    type="number" 
+    name="index" 
+    className="w-full border rounded p-2" 
+    onChange={(e) => setFormData(prev => ({
+        ...prev,
+        index: parseInt(e.target.value) || 0
+    }))}
+    value={formData.index}
+    min="0"
+/>
                                     <label className="block mt-2">Title</label>
                                     <input type="text" name="title" className="w-full border rounded p-2" onChange={handleInputChange} />
 
@@ -750,7 +776,19 @@ export default function StudentRelatedMission() {
                                 <option value="1">Active</option>
                                 <option value="0">Inactive</option>
                                 </select>
-                                
+                                {/* Add this after the status field but before the image section */}
+<label className="block mt-1">Index</label>
+<input
+    type="number"
+    name="index"
+    value={editData?.index ?? 1}
+    onChange={(e) => editData && setEditData({
+        ...editData,
+        index: parseInt(e.target.value) || 1
+    })}
+    className="border px-3 py-1 rounded"
+    min="1"
+/>
                                 {/* Image */}
                                 <label className="block mt-4">Current Thumbnail</label>
                                 {editData.image_url && !editData.image && (
