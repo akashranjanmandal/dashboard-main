@@ -12,19 +12,23 @@ import ReactDOM from 'react-dom';
 const inter = Inter({ subsets: ['latin'] });
 //const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
 const api_startpoint = 'http://152.42.239.141:5000'
-// const api_startpoint = 'http://152.42.239.141:5000'
+
+// const api_startpoint = 'http://127.0.0.1:5000'
+
 
 interface Reference { id: number; title: string; }
 interface PropTypes {
   mode: 'add' | 'edit';
-  initial?: {
-    id: number;
-    game_type: number;
-    reference_id: number;
-    campaign_title: string;
-    description: string;
-    scheduled_for: string;
-  };
+initial?: {
+  id: number;
+  game_type: number;
+  reference_id: number;
+  campaign_title: string;
+  description: string;
+  scheduled_for: string;
+  image_url?: string; // ✅ add this line
+};
+
   onClose: () => void;
 }
 
@@ -40,6 +44,10 @@ export default function AddCampaignModal({
   const [topicId, setTopicId]       = useState<number>(0);
   const [referenceId, setReferenceId] = useState(initial?.reference_id ?? 0);
   const [scheduledFor, setScheduledFor] = useState(initial?.scheduled_for ?? '');
+  // --- existing imports remain ---
+  const [image,   setImage]   = useState<File | null>(null);          // NEW
+  const [preview, setPreview] = useState(initial?.image_url ?? '');   // NEW
+
 
   const [subjects, setSubjects] = useState<Reference[]>([]);
   const [levels,   setLevels]   = useState<Reference[]>([]);
@@ -133,38 +141,42 @@ export default function AddCampaignModal({
         setRefsLoading(false);
       });
   }, [gameType, subjectId, levelId, topicId]);
-
-  const handleSave = async () => {
-    const payload: any = {
-      title,
-      description,
-      game_type:    gameType,
-      reference_id: referenceId,
-      scheduled_for: scheduledFor
-    };
-    // attach filter IDs
-    if (gameType === 1 || gameType === 7) {
-      payload.subject_id = subjectId;
-      payload.level_id   = levelId;
-    }
-    if (gameType === 2) {
-      payload.subject_id = subjectId;
-      payload.level_id   = levelId;
-      payload.topic_id   = topicId;
-    }
-
-    const url    = isEdit ? `${api_startpoint}/api/campaigns/${initial!.id}` : `${api_startpoint}/api/campaigns`;
-    const method = isEdit ? 'PUT' : 'POST';
-
-    const res = await fetch(url, {
-      method,
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
-
-    if (res.ok) onClose();
-    else        alert('Error saving campaign');
+  const handleFile = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImage(file);
+    setPreview(URL.createObjectURL(file));
   };
+const handleSave = async () => {
+  const fd = new FormData();                         // NEW
+
+  fd.append('campaign_title', title);
+  fd.append('description',    description);
+  fd.append('game_type',      String(gameType));
+  fd.append('reference_id',   String(referenceId));
+  fd.append('scheduled_for',  scheduledFor);
+
+  if (gameType === 1 || gameType === 7) {
+    fd.append('subject_id', String(subjectId));
+    fd.append('level_id',   String(levelId));
+  }
+  if (gameType === 2) {
+    fd.append('subject_id', String(subjectId));
+    fd.append('level_id',   String(levelId));
+    fd.append('topic_id',   String(topicId));
+  }
+
+  if (image) fd.append('image', image);              // NEW
+
+  const url    = isEdit
+    ? `${api_startpoint}/api/campaigns/${initial!.id}`
+    : `${api_startpoint}/api/campaigns`;
+  const method = isEdit ? 'PUT' : 'POST';
+
+  const res = await fetch(url, { method, body: fd }); // header removed
+  res.ok ? onClose() : alert('Error saving campaign');
+};
+
 
   const modalContent = (
     <div className="modal-backdrop fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
@@ -287,7 +299,19 @@ export default function AddCampaignModal({
             )}
           </select>
         )}
-        
+        {/* Thumbnail */}
+        <label className="block mb-2">Thumbnail</label>                     {/* NEW */}
+        <input
+        type="file"
+        accept="image/*"
+        onChange={handleFile}
+        className="mb-2"
+        />
+        {preview && (                                                     /* NEW */
+        <img src={preview}
+       alt="preview"
+       className="h-20 w-20 object-cover rounded mb-4" />
+        )}
 
         {/* Schedule date */}
         <label className="block mb-2">Schedule Date</label>
