@@ -11,8 +11,8 @@ import Error from 'next/error';
 import ReactDOM from 'react-dom';
 const inter = Inter({ subsets: ['latin'] });
 //const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
+// const api_startpoint = 'http://localhost:5000'
 const api_startpoint = 'http://152.42.239.141:5000'
-// const api_startpoint = 'http://127.0.0.1:5000'
 
 interface Reference { id: number; title: string; }
 interface PropTypes {
@@ -23,6 +23,7 @@ initial?: {
   reference_id: number;
   campaign_title: string;
   description: string;
+  button_name?: string; // ✅ add this
   scheduled_for: string;
   image_url?: string; // ✅ add this line
 };
@@ -46,6 +47,7 @@ export default function AddCampaignModal({
   const [image,   setImage]   = useState<File | null>(null);          // NEW
   const [preview, setPreview] = useState(initial?.image_url ?? '');   // NEW
 
+const [buttonName, setButtonName] = useState(initial?.button_name ?? '');
 
   const [subjects, setSubjects] = useState<Reference[]>([]);
   const [levels,   setLevels]   = useState<Reference[]>([]);
@@ -71,15 +73,24 @@ export default function AddCampaignModal({
   }, []);
 
   // load topics if quiz
-  useEffect(() => {
-    if (gameType !== 2) return;
-    fetch(`${api_startpoint}/api/topics`, {
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ la_subject_id: subjectId, la_level_id: levelId, status: '1' })
-    })
-      .then(r => r.json())
-      .then(setTopics);
-  }, [gameType, subjectId, levelId]);
+ // load topics if quiz
+useEffect(() => {
+  if (gameType !== 2) return;
+  fetch(`${api_startpoint}/api/topics`, {
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ la_subject_id: subjectId, la_level_id: levelId, status: '1' })
+  })
+    .then(r => r.json())
+    .then(setTopics);
+}, [gameType, subjectId, levelId]);
+
+// Sync topicId to referenceId when gameType is Quiz
+useEffect(() => {
+  if (gameType === 2) {
+    setReferenceId(topicId);
+  }
+}, [topicId, gameType]);
+
 
   // load refs when filters change
   useEffect(() => {
@@ -153,6 +164,7 @@ const handleSave = async () => {
   fd.append('game_type',      String(gameType));
   fd.append('reference_id',   String(referenceId));
   fd.append('scheduled_for',  scheduledFor);
+fd.append('button_name', buttonName);
 
   if (gameType === 1 || gameType === 7) {
     fd.append('subject_id', String(subjectId));
@@ -224,6 +236,13 @@ if (res.ok) {
           value={description}
           onChange={e => setDescription(e.target.value)}
         />
+<label className="block mb-2">Button Name</label>
+<input
+  className="input mb-3 w-full border p-2 rounded"
+  placeholder="e.g. Start, Play Now, Explore"
+  value={buttonName}
+  onChange={e => setButtonName(e.target.value)}
+/>
 
         <label className="block mb-2">Game Type</label>
         <select
@@ -283,25 +302,29 @@ if (res.ok) {
         )}
 
         {/* Dynamic Reference dropdown */}
-        <label className="block mb-1">
-          {gameType === 1 ? 'Select Mission' :
-           gameType === 2 ? 'Select Quiz' :
-           'Select Vision'}
-        </label>
-        {refsLoading ? (
-          <div className='animate-spin rounded-full border-sky-800 border-t-2 w-3 h-3'></div>
-        ): (
-          <select
-            className="select mb-3 w-full border p-2 rounded"
-            value={referenceId}
-            onChange={e => setReferenceId(+e.target.value)}
-          >
-            <option value={0}>-- choose --</option>
-            {refs.map(r =>
-              <option key={r.id} value={r.id}>{r.title}</option>
-            )}
-          </select>
+{/* Reference selector for Mission and Vision only */}
+{(gameType === 1 || gameType === 7) && (
+  <>
+    <label className="block mb-1">
+      {gameType === 1 ? 'Select Mission' : 'Select Vision'}
+    </label>
+    {refsLoading ? (
+      <div className='animate-spin rounded-full border-sky-800 border-t-2 w-3 h-3'></div>
+    ) : (
+      <select
+        className="select mb-3 w-full border p-2 rounded"
+        value={referenceId}
+        onChange={e => setReferenceId(+e.target.value)}
+      >
+        <option value={0}>-- choose --</option>
+        {refs.map(r =>
+          <option key={r.id} value={r.id}>{r.title}</option>
         )}
+      </select>
+    )}
+  </>
+)}
+
         {/* Thumbnail */}
         <label className="block mb-2">Thumbnail</label>                     {/* NEW */}
         <input
