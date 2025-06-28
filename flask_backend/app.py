@@ -9254,6 +9254,7 @@ def list_campaigns():
                 ) AS reference_title,
                 c.title        AS campaign_title,
                 c.description,
+                c.button_name,
                 c.scheduled_for,
                 c.created_at,
                 c.updated_at,
@@ -9282,6 +9283,7 @@ def list_campaigns():
     finally:
         conn.close()
 
+
 @app.route('/api/campaigns', methods=['POST'])
 def create_campaign():
     logger.info("📥 [POST] Create campaign form: %s", dict(request.form))
@@ -9294,6 +9296,7 @@ def create_campaign():
         title         = form.get('title') or form.get('campaign_title')
         description   = form.get('description')
         scheduled_for = form.get('scheduled_for')
+        button_name   = form.get('button_name')
 
         media_id = None
         image_file = request.files.get('image')
@@ -9305,10 +9308,10 @@ def create_campaign():
 
         sql = """
             INSERT INTO lifeapp.la_campaigns
-              (game_type, reference_id, title, description, scheduled_for, media_id, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+              (game_type, reference_id, title, description, scheduled_for, button_name, media_id, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
         """
-        params = (game_type, reference_id, title, description, scheduled_for, media_id)
+        params = (game_type, reference_id, title, description, scheduled_for, button_name, media_id)
 
         conn = get_db_connection()
         with conn.cursor() as cursor:
@@ -9325,10 +9328,9 @@ def create_campaign():
         if conn:
             conn.close()
 
-
 @app.route('/api/campaigns/<int:id>', methods=['PUT'])
 def update_campaign(id):
-    logger.info("✏️ [PUT] Update campaign ID %s: %s", id, dict(request.form))
+    logger.info("✏ [PUT] Update campaign ID %s: %s", id, dict(request.form))
     conn = None
 
     try:
@@ -9338,6 +9340,7 @@ def update_campaign(id):
         title         = form.get('title') or form.get('campaign_title')
         description   = form.get('description')
         scheduled_for = form.get('scheduled_for')
+        button_name   = form.get('button_name')
 
         media_id = None
         image_file = request.files.get('image')
@@ -9353,8 +9356,9 @@ def update_campaign(id):
                    title         = %s,
                    description   = %s,
                    scheduled_for = %s,
+                   button_name   = %s,
         """
-        params = [game_type, reference_id, title, description, scheduled_for]
+        params = [game_type, reference_id, title, description, scheduled_for, button_name]
 
         if media_id:
             sql += " media_id = %s,"
@@ -9377,7 +9381,6 @@ def update_campaign(id):
     finally:
         if conn:
             conn.close()
-
 
 @app.route('/api/campaigns/<int:id>', methods=['DELETE'])
 def delete_campaign(id):
@@ -9422,7 +9425,7 @@ def quiz_list():
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            sql = "SELECT id, JSON_UNQUOTE(JSON_EXTRACT(title, '$.en')) AS title FROM lifeapp.la_questions WHERE status=1"
+            sql = "SELECT id, JSON_UNQUOTE(JSON_EXTRACT(title, '$.en')) AS title FROM lifeapp.la_topics WHERE status=1"
             params = []
             if subject_id:
                 sql += " AND la_subject_id=%s"; params.append(subject_id)
