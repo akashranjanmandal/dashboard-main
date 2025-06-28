@@ -1,27 +1,25 @@
-'use client'
-import React, { useState, useEffect, useCallback, useMemo, useRef, FormEvent, ChangeEvent } from 'react';
+'use client';
+import React, { useState, useEffect } from 'react';
 import { Inter } from 'next/font/google';
 import { Sidebar } from '@/components/ui/sidebar';
 import '@tabler/core/dist/css/tabler.min.css';
-import NumberFlow from '@number-flow/react';
-import { IconEdit, IconPlus, IconTrash, IconX } from '@tabler/icons-react';
-import { ChevronDown } from 'lucide-react';
-import { error } from 'console';
-import Error from 'next/error';
-import ReactDOM from 'react-dom';
-import AddCampaignModal from './AddCampaignModal';  // import only
+import { IconEdit, IconPlus, IconTrash } from '@tabler/icons-react';
+import AddCampaignModal from './AddCampaignModal';
+
 const inter = Inter({ subsets: ['latin'] });
-//const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
+// const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
+// const api_startpoint = 'http://localhost:5000';
 const api_startpoint = 'http://152.42.239.141:5000'
-// const api_startpoint = 'http://127.0.0.1:5000'
+
 interface Campaign {
   id: number;
   game_type: number;
-  game_type_title?:string;
+  game_type_title?: string;
   reference_id: number;
   reference_title: string;
   campaign_title: string;
   description: string;
+  button_name?: string;
   image_url?: string;
   scheduled_for: string;
   created_at: string;
@@ -29,38 +27,41 @@ interface Campaign {
 }
 
 export default function Campaigns() {
-    // State for campaign table data
-    const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-    const [loading, setLoading]     = useState(false);
-    const [modal, setModal] = useState<
-      false | { mode: 'add' | 'edit'; campaign?: Campaign }
-    >(false);
-    const [page, setPage] = useState<number>(0)
-    const[total, setTotal] = useState<number>(0)
-    const fetchCampaigns = async (page = 1) => {
-      setLoading(true);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [modal, setModal] = useState<false | { mode: 'add' | 'edit'; campaign?: Campaign }>(false);
+  const [page, setPage] = useState<number>(1);
+  const [total, setTotal] = useState<number>(0);
+
+  const fetchCampaigns = async (page = 1) => {
+    setLoading(true);
+    try {
       const qs = new URLSearchParams({ page: page.toString(), per_page: '25' });
       const res = await fetch(`${api_startpoint}/api/campaigns?${qs}`);
       const result = await res.json();
-      setCampaigns(result.data);
-      setTotal(result.total);
-      setPage(result.page);
+      setCampaigns(result.data || []);
+      setTotal(result.total || 0);
+      setPage(result.page || 1);
+    } catch (err) {
+      console.error('Error fetching campaigns:', err);
+    } finally {
       setLoading(false);
-    };
-  
-    useEffect(() => {
-      fetchCampaigns();
-    }, []);
-  
-    const openAdd = () => setModal({ mode: 'add' });
-    const openEdit = (camp: Campaign) => setModal({ mode: 'edit', campaign: camp });
-    const closeModal = () => setModal(false);
-  
-    const handleDelete = async (id: number) => {
-      if (!confirm('Delete this campaign?')) return;
-      await fetch(`${api_startpoint}/api/campaigns/${id}`, { method: 'DELETE' });
-      fetchCampaigns();
-    };
+    }
+  };
+
+  useEffect(() => {
+    fetchCampaigns();
+  }, []);
+
+  const openAdd = () => setModal({ mode: 'add' });
+  const openEdit = (camp: Campaign) => setModal({ mode: 'edit', campaign: camp });
+  const closeModal = () => setModal(false);
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('Delete this campaign?')) return;
+    await fetch(`${api_startpoint}/api/campaigns/${id}`, { method: 'DELETE' });
+    fetchCampaigns();
+  };
 
   return (
     <div className={`page bg-body ${inter.className} font-sans`}>
@@ -74,7 +75,7 @@ export default function Campaigns() {
                 <IconPlus className="me-2" /> Add Campaign
               </button>
             </div>
-            {/* Campaigns Table */}
+
             {loading ? (
               <div className="text-center py-10">
                 <div className="spinner-border text-purple" role="status" style={{ width: "3rem", height: "3rem" }}>
@@ -82,48 +83,46 @@ export default function Campaigns() {
                 </div>
                 <p className="mt-3">Loading campaigns...</p>
               </div>
-            // ) : Error ? (
-            //   <div className="text-center text-danger">
-            //     <p>Error: {}</p>
-            //   </div>
             ) : (
               <div className="table-responsive">
                 <table className="table table-striped table-hover">
                   <thead>
                     <tr>
-                    {['ID','Type',  'Image','Ref Title','Title','Desc','Scheduled','Created','Updated','Actions']
-                  .map(h => <th key={h}>{h}</th>)}
+                      {['ID', 'Type', 'Image', 'Ref Title', 'Title', 'Desc', 'Button', 'Scheduled', 'Created', 'Updated', 'Actions']
+                        .map(h => <th key={h}>{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
-                    {campaigns.map((c, index) => (
+                    {campaigns.map((c) => (
                       <tr key={c.id} className="h-12">
-                        <td className="overflow-hidden whitespace-nowrap text-ellipsis">{c.id}</td>
-                        <td className="overflow-hidden whitespace-nowrap text-ellipsis">{c.game_type_title}</td>
-                        <td style={{ width: 72 }}>{c.image_url ? <img src={c.image_url}className="h-10 w-10 object-cover rounded"loading="lazy" />: <span className="text-muted">—</span>}</td>
-                        {/* <td className="overflow-hidden whitespace-nowrap text-ellipsis">{c.reference_id}</td> */}
-                        <td className="overflow-hidden whitespace-nowrap text-ellipsis">{c.reference_title}</td>
-                        <td className="overflow-hidden whitespace-nowrap text-ellipsis">{c.campaign_title}</td>
-                        <td className="overflow-hidden whitespace-nowrap text-ellipsis">{c.description}</td>
-                        <td className="overflow-hidden whitespace-nowrap text-ellipsis">{c.scheduled_for}</td>
-                        <td className="overflow-hidden whitespace-nowrap text-ellipsis">{c.created_at}</td>
-                        <td className="overflow-hidden whitespace-nowrap text-ellipsis">{c.updated_at}</td>
-                        <td className="flex gap-2 overflow-hidden whitespace-nowrap text-ellipsis">
-                          <IconEdit
-                            className="cursor-pointer"
-                            onClick={() => openEdit(c)}
-                          />
-                          <IconTrash
-                            className="cursor-pointer text-red-600"
-                            onClick={() => handleDelete(c.id)}
-                          />
+                        <td>{c.id}</td>
+                        <td>{c.game_type_title}</td>
+                        <td style={{ width: 72 }}>
+                          {c.image_url ? (
+                            <img src={c.image_url} className="h-10 w-10 object-cover rounded" loading="lazy" />
+                          ) : (
+                            <span className="text-muted">—</span>
+                          )}
+                        </td>
+                        <td>{c.reference_title}</td>
+                        <td>{c.campaign_title}</td>
+                        <td>{c.description}</td>
+                        <td>
+                         {c.button_name || 'Start'}
+                        </td>
+                        <td>{c.scheduled_for}</td>
+                        <td>{c.created_at}</td>
+                        <td>{c.updated_at}</td>
+                        <td className="flex gap-2">
+                          <IconEdit className="cursor-pointer" onClick={() => openEdit(c)} />
+                          <IconTrash className="cursor-pointer text-red-600" onClick={() => handleDelete(c.id)} />
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-                {/* Pagination Controls (if needed) */}
-                {/* You may want to add buttons for Previous and Next pages here */}
+
+                {/* Pagination */}
                 <div className="flex items-center gap-2 mt-4">
                   <button
                     className="btn"
@@ -143,10 +142,10 @@ export default function Campaigns() {
                     Next
                   </button>
                 </div>
-
               </div>
             )}
           </div>
+
           {modal && (
             <AddCampaignModal
               mode={modal.mode}
@@ -156,7 +155,6 @@ export default function Campaigns() {
           )}
         </div>
       </div>
-
     </div>
-  )
+  );
 }
