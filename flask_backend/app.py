@@ -8003,24 +8003,31 @@ def get_levels():
         if connection:  # Check if connection is not None
             connection.close()
 
+
+
 @app.route('/api/levels_new', methods=['POST'])
 def create_level():
     """Create a new level."""
+    conn = None
     try:
         data = request.get_json() or {}
+        print("[CREATE] Incoming data:", data)
+
         title_data = data.get('title', {})
         description_data = data.get('description', {})
-        jigyasa_points= data.get('jigyasa_points')
-        mission_points= data.get('mission_points')
-        pragya_points=data.get('pragya_points')
-        puzzle_points= data.get('puzzle_points')
-        puzzle_time =data.get('puzzle_time')
-        quiz_points=  data.get('quiz_points')
-        quiz_time= data.get('quiz_time')
-        riddle_points= data.get('riddle_points')
-        riddle_time= data.get('riddle_time')
+        jigyasa_points = data.get('jigyasa_points')
+        mission_points = data.get('mission_points')
+        pragya_points = data.get('pragya_points')
+        puzzle_points = data.get('puzzle_points')
+        puzzle_time = data.get('puzzle_time')
+        quiz_points = data.get('quiz_points')
+        quiz_time = data.get('quiz_time')
+        riddle_points = data.get('riddle_points')
+        riddle_time = data.get('riddle_time')
+        vision_text_image_points = data.get('vision_text_image_points', 0)
+        vision_mcq_points = data.get('vision_mcq_points', 0)
         status = data.get('status', 1)
-        datetime_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
         sql = """
             INSERT INTO lifeapp.la_levels
               (title, description,
@@ -8028,18 +8035,18 @@ def create_level():
                puzzle_points, puzzle_time,
                quiz_points, quiz_time,
                riddle_points, riddle_time,
-               status,
-               created_at)
+               vision_text_image_points, vision_mcq_points,
+               status, created_at)
             VALUES
-              (%s,      %s,
-               %s,      %s,      %s,
-               %s,      %s,
-               %s,      %s,
-               %s,      %s,
-              %s,
-               NOW()
-              )
+              (%s, %s,
+               %s, %s, %s,
+               %s, %s,
+               %s, %s,
+               %s, %s,
+               %s, %s,
+               %s, NOW())
         """
+
         params = [
             json.dumps(title_data),
             json.dumps(description_data),
@@ -8051,60 +8058,78 @@ def create_level():
             quiz_points,
             quiz_time,
             riddle_points,
-           riddle_time,
+            riddle_time,
+            vision_text_image_points,
+            vision_mcq_points,
             status
         ]
+
+        print("[CREATE] SQL Query:", sql)
+        print("[CREATE] Parameters:", params)
 
         conn = get_db_connection()
         with conn.cursor() as cursor:
             cursor.execute(sql, params)
             conn.commit()
-            return jsonify({'message': 'Level Created'}), 201
+            print("[CREATE] Level created successfully.")
+            return jsonify({'message': 'Level Created', 'reload': True}), 201
     except Exception as e:
+        print("[CREATE] Error:", e)
         return jsonify({'error': str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
+
 
 @app.route('/api/levels_update', methods=['POST'])
 def update_level():
-    """Update a level."""
+    """Update an existing level."""
+    conn = None
     try:
         data = request.get_json() or {}
+        print("[UPDATE] Incoming data:", data)
+
         level_id = data.get('id')
         if not level_id:
+            print("[UPDATE] Missing level ID")
             return jsonify({'error': 'Missing level ID'}), 400
+
         title_data = data.get('title', {})
         description_data = data.get('description', {})
-        jigyasa_points= data.get('jigyasa_points')
-        mission_points= data.get('mission_points')
-        pragya_points=data.get('pragya_points')
-        puzzle_points= data.get('puzzle_points')
-        puzzle_time =data.get('puzzle_time')
-        quiz_points=  data.get('quiz_points')
-        quiz_time= data.get('quiz_time')
-        riddle_points= data.get('riddle_points')
-        riddle_time= data.get('riddle_time')
-        status= data.get('status',1)
-        datetime_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        jigyasa_points = data.get('jigyasa_points')
+        mission_points = data.get('mission_points')
+        pragya_points = data.get('pragya_points')
+        puzzle_points = data.get('puzzle_points')
+        puzzle_time = data.get('puzzle_time')
+        quiz_points = data.get('quiz_points')
+        quiz_time = data.get('quiz_time')
+        riddle_points = data.get('riddle_points')
+        riddle_time = data.get('riddle_time')
+        vision_text_image_points = data.get('vision_text_image_points', 0)
+        vision_mcq_points = data.get('vision_mcq_points', 0)
+        status = data.get('status', 1)
 
         sql = """
             UPDATE lifeapp.la_levels
             SET
-                title           = %s,
-                description     = %s,
-                jigyasa_points  = %s,
-                mission_points  = %s,
-                pragya_points   = %s,
-                puzzle_points   = %s,
-               puzzle_time     = %s,
-                quiz_points     = %s,
-                quiz_time       = %s,
-                riddle_points   = %s,
-                riddle_time     = %s,
-                status          = %s,
-                updated_at      = NOW()
+                title = %s,
+                description = %s,
+                jigyasa_points = %s,
+                mission_points = %s,
+                pragya_points = %s,
+                puzzle_points = %s,
+                puzzle_time = %s,
+                quiz_points = %s,
+                quiz_time = %s,
+                riddle_points = %s,
+                riddle_time = %s,
+                vision_text_image_points = %s,
+                vision_mcq_points = %s,
+                status = %s,
+                updated_at = NOW()
             WHERE id = %s
         """
+
         params = [
             json.dumps(title_data),
             json.dumps(description_data),
@@ -8115,21 +8140,30 @@ def update_level():
             puzzle_time,
             quiz_points,
             quiz_time,
-           riddle_points,
+            riddle_points,
             riddle_time,
+            vision_text_image_points,
+            vision_mcq_points,
             status,
             level_id
         ]
 
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
+        print("[UPDATE] SQL Query:", sql)
+        print("[UPDATE] Parameters:", params)
+
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
             cursor.execute(sql, params)
-            connection.commit()
-        return jsonify({'message': 'Level Updated'}), 200
+            conn.commit()
+            print("[UPDATE] Level updated successfully.")
+        return jsonify({'message': 'Level Updated', 'reload': True}), 200
     except Exception as e:
+        print("[UPDATE] Error:", e)
         return jsonify({'error': str(e)}), 500
     finally:
-        connection.close()
+        if conn:
+            conn.close()
+
 
 @app.route('/api/levels_delete', methods=['POST'])
 def delete_level():
@@ -9249,7 +9283,7 @@ def list_campaigns():
                 c.reference_id,
                 COALESCE(
                     JSON_UNQUOTE(JSON_EXTRACT(m.title, '$.en')),
-                    JSON_UNQUOTE(JSON_EXTRACT(q.title, '$.en')),
+                    JSON_UNQUOTE(JSON_EXTRACT(t.title, '$.en')),
                     JSON_UNQUOTE(JSON_EXTRACT(v.title, '$.en'))
                 ) AS reference_title,
                 c.title        AS campaign_title,
@@ -9261,7 +9295,7 @@ def list_campaigns():
                 media.path AS image_path
                 FROM la_campaigns c
                 LEFT JOIN lifeapp.la_missions m ON c.game_type = 1 AND m.id = c.reference_id
-                LEFT JOIN lifeapp.la_questions q ON c.game_type = 2 AND q.id = c.reference_id
+                LEFT JOIN lifeapp.la_topics t ON c.game_type = 2 AND t.id = c.reference_id
                 LEFT JOIN lifeapp.visions v ON c.game_type = 7 AND v.id = c.reference_id
                 LEFT JOIN lifeapp.media media ON media.id = c.media_id
                 ORDER BY c.scheduled_for DESC
@@ -9282,7 +9316,6 @@ def list_campaigns():
 
     finally:
         conn.close()
-
 
 @app.route('/api/campaigns', methods=['POST'])
 def create_campaign():
@@ -9415,29 +9448,34 @@ def mission_list():
     finally:
         conn.close()
 
-
 @app.route('/api/quiz_list', methods=['POST'])
 def quiz_list():
     data       = request.get_json() or {}
     subject_id = data.get('subject_id')
     level_id   = data.get('level_id')
-    topic_id   = data.get('topic_id')
+
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            sql = "SELECT id, JSON_UNQUOTE(JSON_EXTRACT(title, '$.en')) AS title FROM lifeapp.la_topics WHERE status=1"
+            sql = """
+                SELECT id, JSON_UNQUOTE(JSON_EXTRACT(title, '$.en')) AS title
+                FROM lifeapp.la_topics
+                WHERE status = 1
+            """
             params = []
             if subject_id:
-                sql += " AND la_subject_id=%s"; params.append(subject_id)
+                sql += " AND la_subject_id=%s"
+                params.append(subject_id)
             if level_id:
-                sql += " AND la_level_id=%s";   params.append(level_id)
-            if topic_id:
-                sql += " AND la_topic_id=%s";   params.append(topic_id)
+                sql += " AND la_level_id=%s"
+                params.append(level_id)
+
             cursor.execute(sql, params)
             items = cursor.fetchall()
         return jsonify(items), 200
     finally:
         conn.close()
 
+        
 if __name__ == '__main__':
     app.run(debug=True,  use_reloader=True)
