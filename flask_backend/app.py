@@ -28,8 +28,8 @@ import uuid
 import boto3
 
 # Load environment variables from .env file
-env_path = Path('.') / '.local.env'
-load_dotenv()
+env_path = Path(__file__).resolve().parent / '.local.env'
+load_dotenv(dotenv_path=env_path)
 # def get_db_connection():
 #     return pymysql.connect(
 #         host='localhost',  # Your MySQL host
@@ -2708,151 +2708,149 @@ def fetch_coupon_redeem_list():
 ######################## STUDENT/ MISSION APIs ####################################
 ###################################################################################
 ###################################################################################
-
 @app.route('/api/student_mission_search', methods=['POST'])
 def mission_search():
+    print("📥 Received request for /api/student_mission_search")
+
     filters = request.get_json() or {}
     mission_acceptance = filters.get('mission_acceptance')
     assigned_by = filters.get('assigned_by')
-    from_date = filters.get('from_date')  # New filter: starting date
-    to_date = filters.get('to_date')      # New filter: ending date
-    page     = int(filters.get('page', 1))
+    from_date = filters.get('from_date')
+    to_date = filters.get('to_date')
+    page = int(filters.get('page', 1))
     per_page = int(filters.get('per_page', 50))
-    offset   = (page - 1) * per_page
-    connection = get_db_connection()
-    # Build the base query with the CTE, including mission count aggregations
-    sql = """
-            WITH cte AS (
-                SELECT 
-                    mc.id as Row_ID,
-                    m.id AS Mission_ID,
-                    m.title AS Mission_Title,
-                    CASE 
-                        WHEN ma.teacher_id IS NULL OR ma.teacher_id = u.id THEN 'Self'
-                        ELSE t.name 
-                    END AS Assigned_By,
-                    u.id AS Student_ID,
-                    u.name AS Student_Name,
-                    u.school_code AS school_code,
-                    s.name AS School_Name,
-                    CASE 
-                        WHEN mc.approved_at IS NOT NULL THEN 'Approved'
-                        WHEN mc.rejected_at IS NOT NULL THEN 'Rejected'
-                        ELSE 'Requested'
-                    END AS Status,
-                    mc.created_at AS Requested_At,
-                    mc.points AS Total_Points,
-                    mc.timing AS Each_Mission_Timing,
-                    u.mobile_no,
-                    u.dob,
-                    u.grade,
-                    u.city,
-                    u.state,
-                    u.address,
-                    u.earn_coins,
-                    u.heart_coins,
-                    u.brain_coins,
-                    mc.media_id,
-                    mia.path as media_path
-                FROM lifeapp.la_mission_completes mc
-                LEFT JOIN lifeapp.users u ON mc.user_id = u.id
-                INNER JOIN lifeapp.la_missions m 
-                    ON m.id = mc.la_mission_id AND mc.user_id = u.id
-                LEFT JOIN lifeapp.la_mission_assigns ma ON m.id = ma.la_mission_id
-                LEFT JOIN lifeapp.users t ON ma.teacher_id = t.id
-                LEFT JOIN lifeapp.schools s ON u.school_id = s.id
-                LEFT JOIN lifeapp.media mia on mia.id = mc.media_id
-            )
-            SELECT * FROM cte
-            WHERE 1=1
+    offset = (page - 1) * per_page
 
+    print(f"🔎 Filters received: {filters}")
+    print(f"📄 Page: {page}, Per Page: {per_page}, Offset: {offset}")
+
+    sql = """
+        WITH cte AS (
+            SELECT 
+                mc.id AS Row_ID,
+                m.id AS Mission_ID,
+                m.title AS Mission_Title,
+                CASE 
+                    WHEN ma.teacher_id IS NULL THEN 'Self'
+                    ELSE t.name 
+                END AS Assigned_By,
+                u.id AS Student_ID,
+                u.name AS Student_Name,
+                u.school_code AS school_code,
+                s.name AS School_Name,
+                CASE 
+                    WHEN mc.approved_at IS NOT NULL THEN 'Approved'
+                    WHEN mc.rejected_at IS NOT NULL THEN 'Rejected'
+                    ELSE 'Requested'
+                END AS Status,
+                mc.created_at AS Requested_At,
+                mc.points AS Total_Points,
+                mc.timing AS Each_Mission_Timing,
+                u.mobile_no,
+                u.dob,
+                u.grade,
+                u.city,
+                u.state,
+                u.address,
+                u.earn_coins,
+                u.heart_coins,
+                u.brain_coins,
+                mc.media_id,
+                mia.path AS media_path
+            FROM lifeapp.la_mission_completes mc
+            JOIN lifeapp.users u ON mc.user_id = u.id
+            JOIN lifeapp.la_missions m 
+                ON m.id = mc.la_mission_id
+            LEFT JOIN lifeapp.la_mission_assigns ma 
+                ON ma.la_mission_id = m.id AND ma.user_id = u.id
+            LEFT JOIN lifeapp.users t ON ma.teacher_id = t.id
+            LEFT JOIN lifeapp.schools s ON u.school_id = s.id
+            LEFT JOIN lifeapp.media mia ON mia.id = mc.media_id
+        )
+        SELECT * FROM cte
+        WHERE 1=1
     """
+
     params = []
-    
     if mission_acceptance and mission_acceptance in ("Approved", "Requested", "Rejected"):
         sql += " AND cte.Status = %s"
         params.append(mission_acceptance)
+        print(f"🟡 Filter: mission_acceptance={mission_acceptance}")
 
     if assigned_by:
         if assigned_by.lower() == "self":
             sql += " AND cte.Assigned_By = 'Self'"
+            print(f"🟡 Filter: assigned_by=Self")
         elif assigned_by.lower() == "teacher":
             sql += " AND cte.Assigned_By <> 'Self'"
+            print(f"🟡 Filter: assigned_by=Teacher")
 
-    # Filter for creation date range
     if from_date:
         sql += " AND cte.Requested_At >= %s"
         params.append(from_date)
+        print(f"🟡 Filter: from_date={from_date}")
+
     if to_date:
         sql += " AND cte.Requested_At <= %s"
         params.append(to_date)
+        print(f"🟡 Filter: to_date={to_date}")
 
-    # NEW: Add filter for School ID and Mobile No.
     schoolCodes = filters.get('school_code')
     if schoolCodes:
-        # 1. Make sure it’s a Python list
         codes = schoolCodes if isinstance(schoolCodes, list) else [schoolCodes]
-
-        # 2. Create “%s,%s,…,%s” with one %s per code
         placeholders = ",".join(["%s"] * len(codes))
-
-        # 3. Inject both IN‑lists into your SQL
-        sql += f"""
-        AND (
-            cte.school_code IN ({placeholders})
-        
-        )
-        """
-        # OR u.school_id   IN ({placeholders})
-        # 4a. Bind for u.school_code → cast each code to int()
+        sql += f" AND cte.school_code IN ({placeholders})"
         params.extend([int(c) for c in codes])
+        print(f"🟡 Filter: school_codes={codes}")
 
-        # 4b. Bind for u.school_id   → use the raw codes (or ints if your IDs are numeric)
-        # params.extend(codes)
-        
     mobile_no = filters.get('mobile_no')
     if mobile_no:
         sql += " AND cte.mobile_no = %s"
         params.append(mobile_no)
+        print(f"🟡 Filter: mobile_no={mobile_no}")
 
-    # sql += " ORDER BY cte.Requested_At DESC ;"
-    
-    # First: get total count for pagination metadata
     count_sql = f"SELECT COUNT(*) AS total FROM ({sql}) AS sub"
+    print(f"📊 Count SQL: {count_sql}")
+    print(f"📊 Count Params: {params}")
+
     try:
-      connection = get_db_connection()
-      with connection.cursor() as cursor:
-        cursor.execute(count_sql, tuple(params))
-        total = cursor.fetchone()['total']
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            print("🔎 Executing count query...")
+            cursor.execute(count_sql, tuple(params))
+            total = cursor.fetchone()['total']
+            print(f"✅ Total rows: {total}")
 
-      # Now fetch just the one page:
-      page_sql = sql + " ORDER BY cte.Requested_At DESC LIMIT %s OFFSET %s"
-      page_params = params + [per_page, offset]
+        page_sql = sql + " ORDER BY cte.Requested_At DESC LIMIT %s OFFSET %s"
+        page_params = params + [per_page, offset]
+        print(f"📄 Page SQL: {page_sql}")
+        print(f"📄 Page Params: {page_params}")
 
-      with connection.cursor() as cursor:
-        cursor.execute(page_sql, tuple(page_params))
-        rows = cursor.fetchall()
+        with connection.cursor() as cursor:
+            print("🔎 Executing page query...")
+            cursor.execute(page_sql, tuple(page_params))
+            rows = cursor.fetchall()
+            base_url = os.getenv('BASE_URL')
+            for r in rows:
+                r['media_url'] = f"{base_url}/{r['media_path']}" if r.get('media_path') else None
+            print(f"✅ Rows fetched: {len(rows)}")
 
-        # build media_url as before…
-        base_url = os.getenv('BASE_URL')
-        for r in rows:
-          r['media_url'] = f"{base_url}/{r['media_path']}" if r.get('media_path') else None
-
-      # return both the page of data _and_ pagination info
-      return jsonify({
-        'data': rows,
-        'pagination': {
-          'total': total,
-          'page': page,
-          'per_page': per_page,
-          'total_pages': math.ceil(total / per_page)
-        }
-      })
+        return jsonify({
+            'data': rows,
+            'pagination': {
+                'total': total,
+                'page': page,
+                'per_page': per_page,
+                'total_pages': math.ceil(total / per_page)
+            }
+        })
 
     except Exception as e:
-      return jsonify({'error': str(e)}), 500
+        print(f"❌ Error occurred: {e}")
+        return jsonify({'error': str(e)}), 500
     finally:
-      connection.close()
+        connection.close()
+        print("🔚 Connection closed.")
 
 @app.route('/api/update_mission_status', methods=['POST'])
 def update_mission_status():
@@ -2862,35 +2860,114 @@ def update_mission_status():
     student_id = data.get('student_id')
     action = data.get('action')
 
+    print(f"📥 Received mission status update: row_id={row_id}, mission_id={mission_id}, student_id={student_id}, action={action}")
+
     if not all([row_id, student_id, action]):
+        print("❌ Missing parameters")
         return jsonify({'error': 'Missing parameters'}), 400
 
+    conn = get_db_connection()
     try:
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
+        with conn.cursor() as cursor:
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
             if action == 'approve':
-                sql = """
-                    UPDATE lifeapp.la_mission_completes
-                    SET approved_at = NOW(), rejected_at = NULL
+                # 1️⃣ mark approved
+                print("✅ Marking mission as approved...")
+                cursor.execute("""
+                    UPDATE la_mission_completes
+                    SET approved_at = %s, rejected_at = NULL
                     WHERE id = %s AND user_id = %s
-                """
+                """, (now, row_id, student_id))
+
+                # 2️⃣ fetch mission details
+                cursor.execute("""
+                    SELECT
+                        lm.la_level_id,
+                        lm.type,
+                        ll.mission_points,
+                        ll.jigyasa_points,
+                        ll.pragya_points
+                    FROM la_missions lm
+                    JOIN la_levels ll ON ll.id = lm.la_level_id
+                    WHERE lm.id = %s
+                """, (mission_id,))
+                result = cursor.fetchone()
+
+                if result:
+                    mission_type = result["type"]
+                    if mission_type == 1:
+                        mission_points = result["mission_points"]
+                    elif mission_type == 5:
+                        mission_points = result["jigyasa_points"]
+                    elif mission_type == 6:
+                        mission_points = result["pragya_points"]
+                    else:
+                        mission_points = 0
+
+                    print(f"🪙 Mission points resolved: {mission_points} for mission_type {mission_type}")
+
+                    if mission_points and mission_points > 0:
+                        # insert coin transaction
+                        print("💰 Inserting coin transaction...")
+                        cursor.execute("""
+                            INSERT INTO coin_transactions
+                                (user_id, type, amount, coinable_type, coinable_id, created_at, updated_at)
+                            VALUES
+                                (%s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            student_id,
+                            mission_type,
+                            mission_points,
+                            'App\\Models\\LaMissionComplete',
+                            row_id,
+                            now,
+                            now
+                        ))
+
+                        # update user coins
+                        print("🔄 Updating user earn_coins...")
+                        cursor.execute("""
+                            UPDATE users
+                            SET earn_coins = earn_coins + %s,
+                                updated_at = %s
+                            WHERE id = %s
+                        """, (mission_points, now, student_id))
+
+                        # ✅ store points in la_mission_completes
+                        print("✍  Updating la_mission_completes.points...")
+                        cursor.execute("""
+                            UPDATE la_mission_completes
+                            SET points = %s, updated_at = %s
+                            WHERE id = %s AND user_id = %s
+                        """, (mission_points, now, row_id, student_id))
+                    else:
+                        print("⚠  mission_points evaluated as 0 — skipping coin transaction.")
+                else:
+                    print("❌ Could not fetch mission details.")
+
             elif action == 'reject':
-                sql = """
-                    UPDATE lifeapp.la_mission_completes
-                    SET rejected_at = NOW(), approved_at = NULL
+                print("⛔ Marking mission as rejected...")
+                cursor.execute("""
+                    UPDATE la_mission_completes
+                    SET rejected_at = %s, approved_at = NULL
                     WHERE id = %s AND user_id = %s
-                """
+                """, (now, row_id, student_id))
             else:
+                print("❌ Invalid action passed.")
                 return jsonify({'error': 'Invalid action'}), 400
-            
-            cursor.execute(sql, (row_id, student_id))
-            connection.commit()
-            
-        return jsonify({'success': True})
+
+            conn.commit()
+            print("✅ Transaction committed successfully")
+            return jsonify({'success': True}), 200
+
     except Exception as e:
+        print(f"❌ Exception: {str(e)}")
         return jsonify({'error': str(e)}), 500
     finally:
-        connection.close()
+        conn.close()
+        print("🔚 Connection closed")
+
 
 ###################################################################################
 ###################################################################################
@@ -2987,43 +3064,96 @@ def fetch_vision_sessions():
 
 @app.route('/api/vision_sessions/<int:answer_id>/score', methods=['PUT'])
 def update_vision_session_score(answer_id):
-    score = 25
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"➡️ Starting score update for answer ID: {answer_id} at {now}")
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # Step 1: Update score in vision_question_answers
+            # Fetch answer details + its vision level
+            print("🔍 Fetching vision answer and level data...")
+            cursor.execute("""
+                SELECT vqa.answer_type, vqa.vision_id, vqa.user_id, v.la_level_id
+                FROM vision_question_answers vqa
+                JOIN visions v ON vqa.vision_id = v.id
+                WHERE vqa.id = %s
+            """, (answer_id,))
+            row = cursor.fetchone()
+            
+            if not row:
+                print("❌ Vision answer not found.")
+                return jsonify({'error': 'Vision answer not found'}), 404
+
+            answer_type = row['answer_type']
+            level_id    = row['la_level_id']
+            user_id     = row['user_id']
+
+            print(f"✅ Fetched: answer_type={answer_type}, level_id={level_id}, user_id={user_id}")
+
+            if answer_type not in ('text', 'image'):
+                print("❌ Invalid answer type for admin approval.")
+                return jsonify({'error': 'Only text/image answers can be approved from admin panel'}), 400
+
+            # get text/image vision points dynamically
+            print("🔍 Fetching vision points from la_levels...")
+            cursor.execute("""
+                SELECT vision_text_image_points
+                FROM la_levels
+                WHERE id = %s
+            """, (level_id,))
+            level = cursor.fetchone()
+            if not level:
+                print("❌ Level not found.")
+                return jsonify({'error': 'Level not found'}), 404
+
+            score = level['vision_text_image_points']
+            print(f"✅ Vision points for level: {score}")
+
+            # Step 1: update the vision_question_answers score
+            print("📝 Updating vision_question_answers with score...")
             cursor.execute("""
                 UPDATE vision_question_answers
                 SET score = %s, updated_at = %s
                 WHERE id = %s
             """, (score, now, answer_id))
+            print("✅ Score updated.")
 
-            # Step 2: Insert coin transaction
+            # Step 2: insert coin transaction
+            print("💰 Inserting coin transaction...")
             cursor.execute("""
                 INSERT INTO coin_transactions (user_id, type, amount, coinable_type, coinable_id, created_at, updated_at)
-                SELECT user_id, %s, %s, %s, id, %s, %s
-                FROM vision_question_answers
-                WHERE id = %s
-            """, (7, score, 'App\\Models\\VisionQuestionAnswer', now, now, answer_id))
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
+                user_id,
+                7,  # TYPE_VISION
+                score,
+                'App\\Models\\VisionQuestionAnswer',
+                answer_id,
+                now,
+                now
+            ))
+            print("✅ Coin transaction inserted.")
 
-            # Step 3: Update users.earn_coins
+            # Step 3: update user’s earn_coins
+            print("🔁 Updating user's earn_coins...")
             cursor.execute("""
                 UPDATE users
-                JOIN vision_question_answers ON users.id = vision_question_answers.user_id
-                SET users.earn_coins = users.earn_coins + %s,
-                    users.updated_at = %s
-                WHERE vision_question_answers.id = %s
-            """, (score, now, answer_id))
+                SET earn_coins = earn_coins + %s,
+                    updated_at = %s
+                WHERE id = %s
+            """, (score, now, user_id))
+            print("✅ User's coins updated.")
 
             conn.commit()
+            print("🎉 All updates committed successfully.")
             return jsonify({'success': True, 'coins_awarded': score}), 200
 
     except Exception as e:
+        print(f"❌ Exception occurred: {e}")
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+        print("🔒 Database connection closed.")
 
 
 @app.route('/api/vision_sessions/<int:answer_id>/status', methods=['PUT'])
