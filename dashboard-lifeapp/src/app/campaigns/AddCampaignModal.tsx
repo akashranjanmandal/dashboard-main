@@ -12,7 +12,7 @@ import ReactDOM from 'react-dom';
 const inter = Inter({ subsets: ['latin'] });
 //const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
 // const api_startpoint = 'http://localhost:5000'
-const api_startpoint = 'http://152.42.239.141:5000'
+const api_startpoint = 'http://http://152.42.239.141:5000'
 
 interface Reference { id: number; title: string; }
 interface PropTypes {
@@ -157,39 +157,41 @@ useEffect(() => {
     setPreview(URL.createObjectURL(file));
   };
 const handleSave = async () => {
-  const fd = new FormData();                         // NEW
+  const fd = new FormData();
 
   fd.append('campaign_title', title);
-  fd.append('description',    description);
-  fd.append('game_type',      String(gameType));
-  fd.append('reference_id',   String(referenceId));
-  fd.append('scheduled_for',  scheduledFor);
-fd.append('button_name', buttonName);
+  fd.append('description', description);
+  fd.append('game_type', String(gameType));
+  fd.append('reference_id', String(gameType === 2 ? topicId : referenceId)); // ✅ safer
+  fd.append('scheduled_for', scheduledFor);
+  fd.append('button_name', buttonName);
 
-  if (gameType === 1 || gameType === 7) {
+  if ([1, 2, 7].includes(gameType)) {
     fd.append('subject_id', String(subjectId));
-    fd.append('level_id',   String(levelId));
+    fd.append('level_id', String(levelId));
   }
+
   if (gameType === 2) {
-    fd.append('subject_id', String(subjectId));
-    fd.append('level_id',   String(levelId));
-    fd.append('topic_id',   String(topicId));
+    fd.append('topic_id', String(topicId));
   }
 
-  if (image) fd.append('image', image);              // NEW
+  if (image) {
+    fd.append('image', image);
+  }
 
-  const url    = isEdit
+  const url = isEdit
     ? `${api_startpoint}/api/campaigns/${initial!.id}`
     : `${api_startpoint}/api/campaigns`;
   const method = isEdit ? 'PUT' : 'POST';
 
-const res = await fetch(url, { method, body: fd });
+  const res = await fetch(url, { method, body: fd });
 
-if (res.ok) {
-  onClose();
-} else {
-  alert('Error saving campaign');
-}
+  if (res.ok) {
+    onClose();
+  } else {
+    const errorData = await res.json().catch(() => null);
+    alert(errorData?.message || 'Error saving campaign');
+  }
 };
 
 
@@ -356,12 +358,18 @@ if (res.ok) {
             Cancel
           </button>
           <button
-            className="btn btn-primary"
-            onClick={handleSave}
-            disabled={!referenceId || !title || !scheduledFor}
-          >
-            Save
-          </button>
+  className="btn btn-primary"
+  onClick={handleSave}
+  disabled={
+    !title ||
+    !scheduledFor ||
+    (gameType === 2 && !topicId) ||
+    ((gameType === 1 || gameType === 7) && !referenceId)
+  }
+>
+  Save
+</button>
+
         </div>
       </div>
       </div>
