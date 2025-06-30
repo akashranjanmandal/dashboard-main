@@ -9565,20 +9565,68 @@ def mission_list():
     data       = request.get_json() or {}
     subject_id = data.get('subject_id')
     level_id   = data.get('level_id')
+
+    print(f"📥 /api/mission_list request subject_id={subject_id}, level_id={level_id}")
+
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            sql = "SELECT id, JSON_UNQUOTE(JSON_EXTRACT(title, '$.en')) as title FROM lifeapp.la_missions WHERE status=1"
+            sql = """
+                SELECT id, JSON_UNQUOTE(JSON_EXTRACT(title, '$.en')) as title
+                FROM lifeapp.la_missions
+                WHERE status=1
+                  AND allow_for=1
+            """
             params = []
             if subject_id:
-                sql += " AND la_subject_id=%s"; params.append(subject_id)
+                sql += " AND la_subject_id=%s"
+                params.append(subject_id)
             if level_id:
-                sql += " AND la_level_id=%s";   params.append(level_id)
+                sql += " AND la_level_id=%s"
+                params.append(level_id)
+            
+            print(f"📝 Final SQL: {sql} with params: {params}")
             cursor.execute(sql, params)
             items = cursor.fetchall()
+
         return jsonify(items), 200
     finally:
         conn.close()
+        print("🔚 DB connection closed.")
+
+@app.route('/api/vision_list', methods=['POST'])
+def vision_list():
+    data       = request.get_json() or {}
+    subject_id = data.get('subject_id')
+    level_id   = data.get('level_id')
+
+    print(f"📥 /api/vision_list request subject_id={subject_id}, level_id={level_id}")
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            sql = """
+                SELECT id, JSON_UNQUOTE(JSON_EXTRACT(title, '$.en')) as title
+                FROM lifeapp.visions
+                WHERE status=1
+                  AND allow_for IN (1, 3)
+            """
+            params = []
+            if subject_id:
+                sql += " AND la_subject_id=%s"
+                params.append(subject_id)
+            if level_id:
+                sql += " AND la_level_id=%s"
+                params.append(level_id)
+
+            print(f"📝 Final SQL: {sql} with params: {params}")
+            cursor.execute(sql, params)
+            items = cursor.fetchall()
+
+        return jsonify(items), 200
+    finally:
+        conn.close()
+        print("🔚 DB connection closed.")
 
 @app.route('/api/quiz_list', methods=['POST'])
 def quiz_list():
