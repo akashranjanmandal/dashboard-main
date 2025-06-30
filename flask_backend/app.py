@@ -28,8 +28,12 @@ import uuid
 import boto3
 
 # Load environment variables from .env file
-env_path = Path(__file__).resolve().parent / '.local.env'
-load_dotenv(dotenv_path=env_path)
+
+env_path = Path('.') / '.local.env'
+load_dotenv()
+
+# env_path = Path(__file__).resolve().parent / '.local.env'
+# load_dotenv(dotenv_path=env_path)
 # def get_db_connection():
 #     return pymysql.connect(
 #         host='localhost',  # Your MySQL host
