@@ -1,16 +1,15 @@
-'use client';
-import React, { useState, useEffect } from 'react';
-import { Inter } from 'next/font/google';
-import { Sidebar } from '@/components/ui/sidebar';
-import '@tabler/core/dist/css/tabler.min.css';
-import { IconEdit, IconPlus, IconTrash } from '@tabler/icons-react';
-import AddCampaignModal from './AddCampaignModal';
+"use client";
+import React, { useState, useEffect } from "react";
+import { Inter } from "next/font/google";
+import { Sidebar } from "@/components/ui/sidebar";
+import "@tabler/core/dist/css/tabler.min.css";
+import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
+import AddCampaignModal from "./AddCampaignModal";
 
-const inter = Inter({ subsets: ['latin'] });
+const inter = Inter({ subsets: ["latin"] });
 // const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
-// const api_startpoint = 'http://localhost:5000
+// const api_startpoint = "http://localhost:5000";
 const api_startpoint = 'http://152.42.239.141:5000'
-;
 
 interface Campaign {
   id: number;
@@ -25,26 +24,32 @@ interface Campaign {
   scheduled_for: string;
   created_at: string;
   updated_at: string;
+  status?: number;
+  la_subject_id?: number | null;
+  la_level_id?: number | null;
+  topic_id?: number;
 }
 
 export default function Campaigns() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(false);
-  const [modal, setModal] = useState<false | { mode: 'add' | 'edit'; campaign?: Campaign }>(false);
+  const [modal, setModal] = useState<
+    false | { mode: "add" | "edit"; campaign?: Campaign }
+  >(false);
   const [page, setPage] = useState<number>(1);
   const [total, setTotal] = useState<number>(0);
 
   const fetchCampaigns = async (page = 1) => {
     setLoading(true);
     try {
-      const qs = new URLSearchParams({ page: page.toString(), per_page: '25' });
+      const qs = new URLSearchParams({ page: page.toString(), per_page: "25" });
       const res = await fetch(`${api_startpoint}/api/campaigns?${qs}`);
       const result = await res.json();
       setCampaigns(result.data || []);
       setTotal(result.total || 0);
       setPage(result.page || 1);
     } catch (err) {
-      console.error('Error fetching campaigns:', err);
+      console.error("Error fetching campaigns:", err);
     } finally {
       setLoading(false);
     }
@@ -54,20 +59,21 @@ export default function Campaigns() {
     fetchCampaigns();
   }, []);
 
-  const openAdd = () => setModal({ mode: 'add' });
-  const openEdit = (camp: Campaign) => setModal({ mode: 'edit', campaign: camp });
+  const openAdd = () => setModal({ mode: "add" });
+  const openEdit = (camp: Campaign) =>
+    setModal({ mode: "edit", campaign: camp });
   const closeModal = () => setModal(false);
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this campaign?')) return;
-    await fetch(`${api_startpoint}/api/campaigns/${id}`, { method: 'DELETE' });
+    if (!confirm("Delete this campaign?")) return;
+    await fetch(`${api_startpoint}/api/campaigns/${id}`, { method: "DELETE" });
     fetchCampaigns();
   };
 
   return (
     <div className={`page bg-body ${inter.className} font-sans`}>
       <Sidebar />
-      <div className="page-wrapper" style={{ marginLeft: '250px' }}>
+      <div className="page-wrapper" style={{ marginLeft: "250px" }}>
         <div className="page-body">
           <div className="container-xl pt-4 pb-4 space-y-4">
             <div className="d-flex justify-content-between align-items-center mb-3">
@@ -79,7 +85,11 @@ export default function Campaigns() {
 
             {loading ? (
               <div className="text-center py-10">
-                <div className="spinner-border text-purple" role="status" style={{ width: "3rem", height: "3rem" }}>
+                <div
+                  className="spinner-border text-purple"
+                  role="status"
+                  style={{ width: "3rem", height: "3rem" }}
+                >
                   <span className="visually-hidden">Loading...</span>
                 </div>
                 <p className="mt-3">Loading campaigns...</p>
@@ -89,8 +99,22 @@ export default function Campaigns() {
                 <table className="table table-striped table-hover">
                   <thead>
                     <tr>
-                      {['ID', 'Type', 'Image', 'Ref Title', 'Title', 'Desc', 'Button', 'Scheduled', 'Created', 'Updated', 'Actions']
-                        .map(h => <th key={h}>{h}</th>)}
+                      {[
+                        "ID",
+                        "Type",
+                        "Image",
+                        "Ref Title",
+                        "Title",
+                        "Desc",
+                        "Status",
+                        "Button",
+                        "Scheduled",
+                        "Created",
+                        "Updated",
+                        "Actions",
+                      ].map((h) => (
+                        <th key={h}>{h}</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
@@ -100,7 +124,11 @@ export default function Campaigns() {
                         <td>{c.game_type_title}</td>
                         <td style={{ width: 72 }}>
                           {c.image_url ? (
-                            <img src={c.image_url} className="h-10 w-10 object-cover rounded" loading="lazy" />
+                            <img
+                              src={c.image_url}
+                              className="h-10 w-10 object-cover rounded"
+                              loading="lazy"
+                            />
                           ) : (
                             <span className="text-muted">—</span>
                           )}
@@ -108,15 +136,20 @@ export default function Campaigns() {
                         <td>{c.reference_title}</td>
                         <td>{c.campaign_title}</td>
                         <td>{c.description}</td>
-                        <td>
-                         {c.button_name || 'Start'}
-                        </td>
+                        <td>{c.status == 1 ? "active" : "inactive"}</td>
+                        <td>{c.button_name || "Start"}</td>
                         <td>{c.scheduled_for}</td>
                         <td>{c.created_at}</td>
                         <td>{c.updated_at}</td>
                         <td className="flex gap-2">
-                          <IconEdit className="cursor-pointer" onClick={() => openEdit(c)} />
-                          <IconTrash className="cursor-pointer text-red-600" onClick={() => handleDelete(c.id)} />
+                          <IconEdit
+                            className="cursor-pointer"
+                            onClick={() => openEdit(c)}
+                          />
+                          <IconTrash
+                            className="cursor-pointer text-red-600"
+                            onClick={() => handleDelete(c.id)}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -133,7 +166,9 @@ export default function Campaigns() {
                     Previous
                   </button>
 
-                  <span>Page {page} of {Math.ceil(total / 25)}</span>
+                  <span>
+                    Page {page} of {Math.ceil(total / 25)}
+                  </span>
 
                   <button
                     className="btn"
@@ -151,7 +186,10 @@ export default function Campaigns() {
             <AddCampaignModal
               mode={modal.mode}
               initial={modal.campaign}
-              onClose={() => { closeModal(); fetchCampaigns(); }}
+              onClose={() => {
+                closeModal();
+                fetchCampaigns();
+              }}
             />
           )}
         </div>
