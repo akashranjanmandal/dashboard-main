@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 
 from pathlib import Path
 app = Flask(__name__)
-CORS(app)
+# CORS(app)
 
 # Configure CORS to allow requests from http://localhost:3000 with credentials
-# CORS(app, resources={r"/*": {"origins":"*"}}, supports_credentials=True)
+CORS(app, resources={r"/*": {"origins":"http://localhost:3000"}}, supports_credentials=True)
 
 import os
 from dotenv import load_dotenv
@@ -28,10 +28,11 @@ import uuid
 import boto3
 
 # Load environment variables from .env file
-env_path = Path('.') / '.local.env'
+env_path = Path('.') / '.env'
 load_dotenv()
 # env_path = Path(__file__).resolve().parent / '.local.env'
 # load_dotenv(dotenv_path=env_path)
+
 # def get_db_connection():
 #     return pymysql.connect(
 #         host='localhost',  # Your MySQL host
@@ -152,9 +153,9 @@ def debug_env():
         'password': password
     })
 
-@app.route('/')
-def backup():
-    return "Heya, thanks for checking"
+# @app.route('/')
+# def backup():
+#     return "Heya, thanks for checking"
 
 def upload_media(file):
     original_filename = file.filename
@@ -7838,11 +7839,12 @@ def get_subjects():
        Expects a JSON payload with key 'status' that can be "1", "0", or "all".
        "all" returns all subjects.
     """
+    connection = get_db_connection()
     try:
         data = request.get_json() or {}
         status = data.get('status', 'all')  # Default to "all" if not provided
 
-        connection = get_db_connection()
+        
         with connection.cursor() as cursor:
             sql = """
                 SELECT s.id, s.title, s.heading, 
@@ -9418,12 +9420,23 @@ def list_campaigns():
                     JSON_UNQUOTE(JSON_EXTRACT(t.title, '$.en')),
                     JSON_UNQUOTE(JSON_EXTRACT(v.title, '$.en'))
                 ) AS reference_title,
+                COALESCE(
+                    m.la_subject_id,
+                    t.la_subject_id,
+                    v.la_subject_id
+                ) AS la_subject_id,
+                COALESCE(
+                    m.la_level_id,
+                    t.la_level_id,
+                    v.la_level_id
+                ) AS la_level_id,
                 c.title        AS campaign_title,
                 c.description,
                 c.button_name,
                 c.scheduled_for,
                 c.created_at,
                 c.updated_at,
+                c.status,
                 media.path AS image_path
                 FROM la_campaigns c
                 LEFT JOIN lifeapp.la_missions m ON c.game_type = 1 AND m.id = c.reference_id
@@ -9449,27 +9462,110 @@ def list_campaigns():
     finally:
         conn.close()
 
+# BACKUP
+# @app.route('/api/campaigns', methods=['POST'])
+# def create_campaign():
+#     logger.info("📥 [POST] Create campaign request headers: %s", dict(request.headers))
+
+#     # 1️⃣ Determine whether the client sent form-data (with files) or raw JSON
+#     if request.content_type.startswith('multipart/form-data'):
+#         data = request.form.to_dict()
+#     else:
+#         data = request.get_json(force=True, silent=True) or {}
+#     # data = request.form.to_dict()
+#     # 2️⃣ Extract all expected fields
+#     game_type     = data.get('game_type')
+#     reference_id  = data.get('reference_id')
+#     title         = data.get('title') or data.get('campaign_title')
+#     description   = data.get('description')
+#     scheduled_for = data.get('scheduled_for')
+#     button_name   = data.get('button_name')
+#     media_id      = None # maybe provided in JSON
+
+#     # 3️⃣ Handle an uploaded image, if any
+#     image_file = request.files.get('image')
+#     if image_file and image_file.filename:
+#         logger.info(f"📷 Uploading image: {image_file.filename}")
+#         media = upload_media(image_file)
+#         media_id = media['id']
+
+#     # 4️⃣ Parse your dd-mm-YYYY string into a date
+#     try:
+#         scheduled_for_date = datetime.strptime(scheduled_for, '%d-%m-%Y').date()
+#     except (TypeError, ValueError):
+#         # fallback: maybe it’s already YYYY-mm-dd, or missing
+#         scheduled_for_date = scheduled_for
+
+#     # 5️⃣ Validate required fields
+#     if not game_type or not reference_id or not scheduled_for_date:
+#         return jsonify({
+#             'error': 'Missing required field: game_type, reference_id, and scheduled_for are all required.'
+#         }), 400
+
+#     # 6️⃣ Insert into DB
+#     sql = """
+#         INSERT INTO lifeapp.la_campaigns
+#           (game_type, reference_id, title, description, scheduled_for, button_name, media_id, created_at, updated_at)
+#         VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+#     """
+#     params = (
+#         game_type,
+#         reference_id,
+#         title,
+#         description,
+#         scheduled_for,
+#         button_name,
+#         media_id
+#     )
+
+#     conn = None
+#     try:
+#         conn = get_db_connection()
+#         with conn.cursor() as cursor:
+#             cursor.execute(sql, params)
+#             conn.commit()
+#             new_id = cursor.lastrowid
+#             logger.info("✅ Campaign created with ID %s", new_id)
+#             return jsonify({'id': new_id}), 201
+
+#     except Exception as e:
+#         logger.error("🔥 Error in POST /api/campaigns: %s", e)
+#         return jsonify({'error': str(e)}), 500
+
+#     finally:
+#         if conn:
+#             conn.close()
+
 @app.route('/api/campaigns', methods=['POST'])
 def create_campaign():
-    logger.info("📥 [POST] Create campaign form: %s", dict(request.form))
-    conn = None
+    logger.info("📥 [POST] Create campaign")
 
+
+    conn = None
     try:
-        form = request.form
-        game_type     = form.get('game_type')
-        reference_id  = form.get('reference_id')
-        title         = form.get('title') or form.get('campaign_title')
-        description   = form.get('description')
-        scheduled_for = form.get('scheduled_for')
-        button_name   = form.get('button_name')
+        if request.content_type.startswith("application/json"):
+            data = request.get_json()
+        else:
+            data = request.form
+        logger.info("📦 Content-Type: %s", request.content_type)
+
+        game_type     = data.get('game_type')
+        reference_id  = data.get('reference_id')
+        title         = data.get('title') or data.get('campaign_title')
+        description   = data.get('description')
+        scheduled_for = data.get('scheduled_for')
+        button_name   = data.get('button_name')
 
         media_id = None
         image_file = request.files.get('image')
-
+        logger.info("📷 Image file: %s", image_file.filename if image_file else "None")
         if image_file and image_file.filename:
             logger.info(f"📷 Uploading image: {image_file.filename}")
             media = upload_media(image_file)
             media_id = media['id']
+            logger.info("📷 Uploaded media ID: %s", media_id)
+        else:
+            media_id = data.get('media_id')  # Handle JSON input with media_id
 
         sql = """
             INSERT INTO lifeapp.la_campaigns
@@ -9477,6 +9573,10 @@ def create_campaign():
             VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
         """
         params = (game_type, reference_id, title, description, scheduled_for, button_name, media_id)
+
+        logger.debug("📥 Data received: %s", data)
+        logger.debug("📸 Image: %s", image_file)
+        logger.debug("🧾 Params: %s", params)
 
         conn = get_db_connection()
         with conn.cursor() as cursor:
