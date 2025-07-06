@@ -8,8 +8,8 @@ import { IconEdit, IconPlus, IconTrash } from '@tabler/icons-react';
 import Papa from 'papaparse';
 const inter = Inter({ subsets: ['latin'] });
 // const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
-// const api_startpoint = 'http://127.0.0.1:5000'
 const api_startpoint = 'http://152.42.239.141:5000'
+// const api_startpoint = 'http://localhost:5000'
 
 interface ModalProps {
     mode: 'add' | 'edit';
@@ -38,10 +38,13 @@ function AddEditModal({
   const [desc, setDesc]   = useState(initial?.description || '');
   const [you, setYou]     = useState(initial?.youtube_url || '');
   const [forAll, setForAll] = useState(initial ? initial.allow_for.toString() : '1');
+  // Fixed: Use subject_id and level_id from initial data for preselection
   const [subj, setSubj]   = useState(initial?.subject_id?.toString() || '');
   const [lvl, setLvl]     = useState(initial?.level_id?.toString() || '');
   const [stat, setStat]   = useState(initial?.status.toString() || '1');
   const [mcqInputMode, setMcqInputMode] = useState<'manual' | 'csv'>('manual');
+  const [subjTitle, setSubjTitle] = useState(initial?.subject?.toString() || "");
+  const [lvlTitle, setLvlTitle] = useState(initial?.level?.toString() || "");
   const [questionType, setQuestionType] = useState<'mcq'|'reflection'|'image'>(initial?.questions?.[0]?.question_type || 'mcq');
   
   // question states
@@ -54,8 +57,12 @@ function AddEditModal({
   // MCQ questions list
   const initialMcq = isEdit
     ? initial?.questions
-        .filter(q => q.question_type === 'mcq')
-        .map(q => ({ question: q.question, options: q.options ?? {a:'',b:'',c:'',d:''}, correct_answer: q.correct_answer ?? '' }))
+        .filter((q: QuestionPayload) => q.question_type === 'mcq')
+        .map((q: QuestionPayload) => ({
+          question: q.question,
+          options: q.options ?? { a: '', b: '', c: '', d: '' },
+          correct_answer: q.correct_answer ?? ''
+        }))
     : [{ question: '', options: {a:'',b:'',c:'',d:''}, correct_answer: '' }];
   const [mcqList, setMcqList] = useState(initialMcq || [{ question: '', options: {a:'',b:'',c:'',d:''}, correct_answer: '' }]);
 
@@ -108,42 +115,69 @@ const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
   // load subjects, levels and prefill when editing
   useEffect(() => {
     fetch(`${api_startpoint}/api/subjects_list`, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ status: '1' })
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "1" }),
     })
-      .then(r => r.json())
-      .then(setSubjects);
+      .then((r) => r.json())
+      .then((fetchedSubjects) => {
+        setSubjects(fetchedSubjects);
+
+        // If editing, find the subject ID from the subject name and set both ID and title
+        if (isEdit && initial) {
+          const foundSubject = fetchedSubjects.find(
+            (s: { title: string }) => JSON.parse(s.title).en === initial.subject
+          );
+          if (foundSubject) {
+            setSubj(foundSubject.id.toString());
+            setSubjTitle(JSON.parse(foundSubject.title).en);
+          }
+        }
+      });
 
     fetch(`${api_startpoint}/api/levels`, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ page: 1 })
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page: 1 }),
     })
-      .then(r => r.json())
-      .then(setLevels);
+      .then((r) => r.json())
+      .then((fetchedLevels) => {
+        setLevels(fetchedLevels);
+
+        // If editing, find the level ID from the level name and set both ID and title
+        if (isEdit && initial) {
+          const foundLevel = fetchedLevels.find(
+            (l: { title: string }) => JSON.parse(l.title).en === initial.level
+          );
+          if (foundLevel) {
+            setLvl(foundLevel.id.toString());
+            setLvlTitle(JSON.parse(foundLevel.title).en);
+          }
+        }
+      });
 
     if (isEdit && initial) {
-      initial.questions.forEach(q => {
-        if (q.question_type === 'mcq') {
+      initial.questions.forEach((q) => {
+        if (q.question_type === "mcq") {
           setMcqQ(q.question);
-          setMcqOpts(q.options  || { a:'',b:'',c:'',d:'' });
-          setMcqAns(q.correct_answer || '');
-        } else if (q.question_type === 'reflection') {
+          setMcqOpts(q.options || { a: "", b: "", c: "", d: "" });
+          setMcqAns(q.correct_answer || "");
+        } else if (q.question_type === "reflection") {
           setRefQ(q.question);
-        } else if (q.question_type === 'image') {
+        } else if (q.question_type === "image") {
           setImgQ(q.question);
         }
       });
     }
-  }, []);
+  }, [isEdit, initial]);
+
 
   const handleSave = async () => {
     setLoading(true);
 
     const questions: QuestionPayload[] = [];
     if (questionType === 'mcq') {
-      mcqList.forEach(q => {
+      mcqList.forEach((q: { question: any; options: any; correct_answer: any; }) => {
         if (q.question) {
           questions.push({ question_type: 'mcq', question: q.question, options: q.options, correct_answer: q.correct_answer });
         }
@@ -194,161 +228,218 @@ console.log(payload)
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 mt-0">
       <div className="bg-white p-6 rounded-lg w-full max-w-lg max-h-[90vh] overflow-auto">
         <h2 className="text-xl font-semibold mb-4">
-          {isEdit ? 'Edit' : 'Add'} Vision
+          {isEdit ? "Edit" : "Add"} Vision
         </h2>
 
         {/* vision fields */}
-        <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Title" className="w-full border p-2 rounded mb-2" />
-        <textarea value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Description" className="w-full border p-2 rounded mb-2" />
-        <input value={you} onChange={e=>setYou(e.target.value)} placeholder="YouTube URL" className="w-full border p-2 rounded mb-2" />
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Title"
+          className="w-full border p-2 rounded mb-2"
+        />
+        <textarea
+          value={desc}
+          onChange={(e) => setDesc(e.target.value)}
+          placeholder="Description"
+          className="w-full border p-2 rounded mb-2"
+        />
+        <input
+          value={you}
+          onChange={(e) => setYou(e.target.value)}
+          placeholder="YouTube URL"
+          className="w-full border p-2 rounded mb-2"
+        />
 
-        <select value={forAll} onChange={e=>setForAll(e.target.value)} className="w-full border p-2 rounded mb-2">
+        <select
+          value={forAll}
+          onChange={(e) => setForAll(e.target.value)}
+          className="w-full border p-2 rounded mb-2"
+        >
           <option value="1">All</option>
           <option value="2">Teacher</option>
           <option value="3">Student</option>
         </select>
 
-        <select value={subj} onChange={e=>setSubj(e.target.value)} className="w-full border p-2 rounded mb-2">
+        <select
+          value={subj}
+          onChange={(e) => {
+            setSubj(e.target.value);
+            // Find the selected subject title and update subjTitle
+            const selectedSubject = subjects.find(
+              (s) => s.id.toString() === e.target.value
+            );
+            if (selectedSubject) {
+              setSubjTitle(JSON.parse(selectedSubject.title).en);
+            }
+          }}
+          className="w-full border p-2 rounded mb-2"
+        >
           <option value="">Select Subject</option>
-          {subjects.map(s => (
-            <option key={s.id} value={s.id}>{JSON.parse(s.title).en}</option>
+          {subjects.map((s) => (
+            <option key={s.id} value={s.id}>
+              {JSON.parse(s.title).en}
+            </option>
           ))}
         </select>
-
-        <select value={lvl} onChange={e=>setLvl(e.target.value)} className="w-full border p-2 rounded mb-2">
+        <select
+          value={lvl}
+          onChange={(e) => {
+            setLvl(e.target.value);
+            // Find the selected level title and update lvlTitle
+            const selectedLevel = levels.find(
+              (l) => l.id.toString() === e.target.value
+            );
+            if (selectedLevel) {
+              setLvlTitle(JSON.parse(selectedLevel.title).en);
+            }
+          }}
+          className="w-full border p-2 rounded mb-2"
+        >
           <option value="">Select Level</option>
-          {levels.map(l => (
-            <option key={l.id} value={l.id}>{JSON.parse(l.title).en}</option>
+          {levels.map((l) => (
+            <option key={l.id} value={l.id}>
+              {JSON.parse(l.title).en}
+            </option>
           ))}
         </select>
 
-        <select value={stat} onChange={e=>setStat(e.target.value)} className="w-full border p-2 rounded mb-4">
+        <select
+          value={stat}
+          onChange={(e) => setStat(e.target.value)}
+          className="w-full border p-2 rounded mb-4"
+        >
           <option value="1">Active</option>
           <option value="0">Inactive</option>
         </select>
-         <label className="block mb-2">Index Position</label>
-                    <input
-                        type="number"
-                        min="1"
-                        value={index}
-                        onChange={(e) => setIndex(Number(e.target.value))}
-                        className="w-full border p-2 rounded"
-                        placeholder="Enter index position"
-                    />
-        <select value={questionType} onChange={e=>setQuestionType(e.target.value as any)} className="w-full border p-2 rounded mb-4">
+        <label className="block mb-2">Index Position</label>
+        <input
+          type="number"
+          min="1"
+          value={index}
+          onChange={(e) => setIndex(Number(e.target.value))}
+          className="w-full border p-2 rounded"
+          placeholder="Enter index position"
+        />
+        <select
+          value={questionType}
+          onChange={(e) => setQuestionType(e.target.value as any)}
+          className="w-full border p-2 rounded mb-4"
+        >
           <option value="mcq">MCQ</option>
           <option value="reflection">Reflection</option>
           <option value="image">Image</option>
         </select>
 
-{questionType === 'mcq' && (
-  <div className="border p-3 rounded mb-4">
-    <select
-      value={mcqInputMode}
-      onChange={e => setMcqInputMode(e.target.value as 'manual' | 'csv')}
-      className="w-full border p-2 rounded mb-4"
-    >
-      <option value="manual">Upload Manually</option>
-      <option value="csv">Upload via CSV</option>
-    </select>
-
-    {mcqInputMode === 'manual' && (
-      <>
-        {mcqList.map((q, idx) => (
-          <div key={idx} className="mcq-entry">
-            <textarea
-              value={q.question}
-              onChange={e => {
-                const updated = [...mcqList];
-                updated[idx].question = e.target.value;
-                setMcqList(updated);
-              }}
-              placeholder={`Question ${idx + 1}`}
-              className="w-full border p-2 rounded mb-2"
-            />
-            {(['a', 'b', 'c', 'd'] as const).map(opt => (
-              <input
-                key={opt}
-                placeholder={`Option ${opt}`}
-                value={q.options[opt]}
-                onChange={e => {
-                  const updated = [...mcqList];
-                  updated[idx].options[opt] = e.target.value;
-                  setMcqList(updated);
-                }}
-                className="w-full border p-2 rounded mb-1"
-              />
-            ))}
+        {questionType === "mcq" && (
+          <div className="border p-3 rounded mb-4">
             <select
-              value={q.correct_answer}
-              onChange={e => {
-                const updated = [...mcqList];
-                updated[idx].correct_answer = e.target.value;
-                setMcqList(updated);
-              }}
-              className="w-full border p-2 rounded"
+              value={mcqInputMode}
+              onChange={(e) =>
+                setMcqInputMode(e.target.value as "manual" | "csv")
+              }
+              className="w-full border p-2 rounded mb-4"
             >
-              <option value="">Select Correct</option>
-              {['a', 'b', 'c', 'd'].map(opt => (
-                <option key={opt} value={opt}>
-                  {opt.toUpperCase()}
-                </option>
-              ))}
+              <option value="manual">Upload Manually</option>
+              <option value="csv">Upload via CSV</option>
             </select>
-            {mcqList.length > 1 && (
-              <button onClick={() => removeMcq(idx)}>
-                <IconTrash />
-              </button>
+
+            {mcqInputMode === "manual" && (
+              <>
+                {mcqList.map((q, idx) => (
+                  <div key={idx} className="mcq-entry">
+                    <textarea
+                      value={q.question}
+                      onChange={(e) => {
+                        const updated = [...mcqList];
+                        updated[idx].question = e.target.value;
+                        setMcqList(updated);
+                      }}
+                      placeholder={`Question ${idx + 1}`}
+                      className="w-full border p-2 rounded mb-2"
+                    />
+                    {(["a", "b", "c", "d"] as const).map((opt) => (
+                      <input
+                        key={opt}
+                        placeholder={`Option ${opt}`}
+                        value={q.options[opt]}
+                        onChange={(e) => {
+                          const updated = [...mcqList];
+                          updated[idx].options[opt] = e.target.value;
+                          setMcqList(updated);
+                        }}
+                        className="w-full border p-2 rounded mb-1"
+                      />
+                    ))}
+                    <select
+                      value={q.correct_answer}
+                      onChange={(e) => {
+                        const updated = [...mcqList];
+                        updated[idx].correct_answer = e.target.value;
+                        setMcqList(updated);
+                      }}
+                      className="w-full border p-2 rounded"
+                    >
+                      <option value="">Select Correct</option>
+                      {["a", "b", "c", "d"].map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt.toUpperCase()}
+                        </option>
+                      ))}
+                    </select>
+                    {mcqList.length > 1 && (
+                      <button onClick={() => removeMcq(idx)}>
+                        <IconTrash />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {mcqList.length < 5 && (
+                  <button onClick={addMcq} className="add-btn">
+                    <IconPlus /> Add another question
+                  </button>
+                )}
+              </>
+            )}
+
+            {mcqInputMode === "csv" && (
+              <div className="border p-3 rounded bg-gray-50">
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleCsvUpload}
+                  className="mb-2"
+                />
+
+                {/* Download Template Button */}
+                <div>
+                  <a
+                    href="/MCQtemplate.csv"
+                    download="MCQtemplate.csv"
+                    className="btn btn-outline-secondary"
+                  >
+                    Download CSV Template
+                  </a>
+                </div>
+              </div>
             )}
           </div>
-        ))}
-        {mcqList.length < 5 && (
-          <button onClick={addMcq} className="add-btn">
-            <IconPlus /> Add another question
-          </button>
         )}
-      </>
-    )}
 
-    {mcqInputMode === 'csv' && (
-      <div className="border p-3 rounded bg-gray-50">
-        <input
-          type="file"
-          accept=".csv"
-          onChange={handleCsvUpload}
-          className="mb-2"
-        />
-
-        {/* Download Template Button */}
-        <div>
-  <a
-    href="/MCQtemplate.csv"
-    download="MCQtemplate.csv"
-    className="btn btn-outline-secondary"
-  >
-    Download CSV Template
-  </a>
-</div>
-
-      </div>
-    )}
-  </div>
-)}
-
-        {questionType === 'reflection' && (
+        {questionType === "reflection" && (
           <textarea
             value={singleQ}
-            onChange={e=>setSingleQ(e.target.value)}
+            onChange={(e) => setSingleQ(e.target.value)}
             placeholder="Reflection question"
             className="w-full border p-2 mb-2 rounded"
           />
         )}
 
-        {questionType === 'image' && (
+        {questionType === "image" && (
           <input
             type="text"
             value={singleQ}
-            onChange={e=>setSingleQ(e.target.value)}
+            onChange={(e) => setSingleQ(e.target.value)}
             placeholder="Image question URL or prompt"
             className="w-full border p-2 mb-2 rounded"
           />
@@ -356,10 +447,18 @@ console.log(payload)
 
         {/* buttons */}
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 border rounded">Cancel</button>
-          <button onClick={handleSave} disabled={loading} className="px-4 py-2 bg-sky-700 text-white rounded flex items-center">
-            {loading && <span className="animate-spin rounded-full w-3 h-3 border-white border-t-2 mr-2" />}
-            {loading? 'Saving..':'Save'}
+          <button onClick={onClose} className="px-4 py-2 border rounded">
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={loading}
+            className="px-4 py-2 bg-sky-700 text-white rounded flex items-center"
+          >
+            {loading && (
+              <span className="animate-spin rounded-full w-3 h-3 border-white border-t-2 mr-2" />
+            )}
+            {loading ? "Saving.." : "Save"}
           </button>
         </div>
       </div>
@@ -374,10 +473,10 @@ interface VisionRow {
     description: string
     youtube_url: string | null
     allow_for: 1 | 2 | 3
-    subject_id?:string
+    subject_id: number  // Changed: Made this required number instead of optional string
     subject: string
     level: string
-    level_id?:string
+    level_id: number    // Changed: Made this required number instead of optional string
     status: number
     index?: number
     questions: QuestionPayload[]
@@ -425,23 +524,21 @@ export default function VisionsPage() {
         fetchVisions(); 
         fetch(`${api_startpoint}/api/subjects_list`, { 
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }, // Add this line
-            body: JSON.stringify({status: '1'}) // Optional, but ensures valid POST request
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({status: '1'})
           })
         .then(res => res.json())
         .then(setSubjects);
 
         fetch(`${api_startpoint}/api/levels`, {
             method: 'POST',
-            headers: {
-                "Content-Type": "application/json",
-              },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ page: 1 })
           })
             .then(res => res.json())
             .then(data => {
               console.log('Levels response:', data);
-              setLevels(data);  // <- might need to change to setLevels(data.levels) or similar
+              setLevels(data);
             });
 
     }, [fStatus, fSubject, fLevel]);
@@ -480,7 +577,7 @@ export default function VisionsPage() {
                                     className="border p-2 rounded">
                                 <option value="">All Subjects</option>
                                 {subjects.map((subject) => (
-                                    <option key={subject.id} value={subject.id}>  {/* Use subject.id as value */}
+                                    <option key={subject.id} value={String(subject.id)}>
                                         {JSON.parse(subject.title).en}
                                     </option>
                                 ))}
@@ -489,18 +586,11 @@ export default function VisionsPage() {
                                     className="border p-2 rounded">
                                 <option value="">All Levels</option>
                                 {levels.map((level) => (
-                                    <option key={level.id} value={level.id}>  {/* Use level.id as value */}
+                                    <option key={level.id} value={String(level.id)}>
                                         {JSON.parse(level.title).en}
                                     </option>
                                 ))}
                             </select>
-                            {/* <select value={fType} onChange={e => setFType(e.target.value)}
-                                    className="border p-2 rounded">
-                            <option value="">All Types</option>
-                            <option value="mcq">MCQ</option>
-                            <option value="reflection">Reflection</option>
-                            <option value="image">Image</option>
-                            </select> */}
 
                             <button onClick={() => setShowAdd(true)}
                                     className="ml-auto bg-sky-600 text-white px-4 py-2 rounded">
@@ -592,11 +682,7 @@ export default function VisionsPage() {
                                           </td>
                                         </tr>
                                       )}
-                                      
-
-                                      
-                                    
-                                </React.Fragment>
+                                  </React.Fragment>
                                 ))}
                             </tbody>
                             </table>
