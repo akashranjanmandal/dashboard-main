@@ -1,106 +1,128 @@
-'use client'
-import React, { useEffect, useState, ChangeEvent, FormEvent } from 'react';
-import { Inter } from 'next/font/google';
-import '@tabler/core/dist/css/tabler.min.css';
-import { Sidebar } from '@/components/ui/sidebar';
-import NumberFlow from '@number-flow/react';
-import { IconEdit, IconPlus, IconTrash } from '@tabler/icons-react';
-import Papa from 'papaparse';
-const inter = Inter({ subsets: ['latin'] });
-// const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
-const api_startpoint = 'http://152.42.239.141:5000'
-// const api_startpoint = 'http://localhost:5000'
+"use client";
+import React, { useEffect, useState, ChangeEvent, FormEvent } from "react";
+import { Inter } from "next/font/google";
+import "@tabler/core/dist/css/tabler.min.css";
+import { Sidebar } from "@/components/ui/sidebar";
+import NumberFlow from "@number-flow/react";
+import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
+import Papa from "papaparse";
+const inter = Inter({ subsets: ["latin"] });
+// const api_startpoint = "http://localhost:5000";
+const api_startpoint = "http://152.42.239.141:5000";
+
 
 interface ModalProps {
-    mode: 'add' | 'edit';
-    initial?: VisionRow;
-    onClose: ()=>void;
-    onSuccess: ()=>void;
+  mode: "add" | "edit";
+  initial?: VisionRow;
+  onClose: () => void;
+  onSuccess: () => void;
 }
 
 interface QuestionPayload {
-  question_id?: number;               // optional on add
-  question_type: 'mcq' | 'reflection' | 'image';
+  question_id?: number;
+  question_type: "mcq" | "reflection" | "image";
   question: string;
   options?: { a: string; b: string; c: string; d: string };
   correct_answer?: string;
 }
 
-function AddEditModal({
-  mode,
-  initial,
-  onClose,
-  onSuccess
-}: ModalProps) {
-  const isEdit = mode === 'edit';
+function AddEditModal({ mode, initial, onClose, onSuccess }: ModalProps) {
+  const isEdit = mode === "edit";
 
-  const [title, setTitle] = useState(initial?.title || '');
-  const [desc, setDesc]   = useState(initial?.description || '');
-  const [you, setYou]     = useState(initial?.youtube_url || '');
-  const [forAll, setForAll] = useState(initial ? initial.allow_for.toString() : '1');
+  const [title, setTitle] = useState(initial?.title || "");
+  const [desc, setDesc] = useState(initial?.description || "");
+  const [you, setYou] = useState(initial?.youtube_url || "");
+  const [forAll, setForAll] = useState(
+    initial ? initial.allow_for.toString() : "1"
+  );
   // Fixed: Use subject_id and level_id from initial data for preselection
-  const [subj, setSubj]   = useState(initial?.subject_id?.toString() || '');
-  const [lvl, setLvl]     = useState(initial?.level_id?.toString() || '');
-  const [stat, setStat]   = useState(initial?.status.toString() || '1');
-  const [mcqInputMode, setMcqInputMode] = useState<'manual' | 'csv'>('manual');
-  const [subjTitle, setSubjTitle] = useState(initial?.subject?.toString() || "");
+  const [subj, setSubj] = useState(initial?.subject_id?.toString() || "");
+  const [lvl, setLvl] = useState(initial?.level_id?.toString() || "");
+  const [stat, setStat] = useState(initial?.status.toString() || "1");
+  const [mcqInputMode, setMcqInputMode] = useState<"manual" | "csv">("manual");
+  const [subjTitle, setSubjTitle] = useState(
+    initial?.subject?.toString() || ""
+  );
   const [lvlTitle, setLvlTitle] = useState(initial?.level?.toString() || "");
-  const [questionType, setQuestionType] = useState<'mcq'|'reflection'|'image'>(initial?.questions?.[0]?.question_type || 'mcq');
-  
+  const [questionType, setQuestionType] = useState<
+    "mcq" | "reflection" | "image"
+  >(initial?.questions?.[0]?.question_type || "mcq");
+
   // question states
-  const [mcqQ, setMcqQ]       = useState('');
-  const [mcqOpts, setMcqOpts] = useState({ a: '', b: '', c: '', d: '' });
-  const [mcqAns, setMcqAns]   = useState('');
-  const [refQ, setRefQ]       = useState('');
-  const [imgQ, setImgQ]       = useState('');
+  const [mcqQ, setMcqQ] = useState("");
+  const [mcqOpts, setMcqOpts] = useState({ a: "", b: "", c: "", d: "" });
+  const [mcqAns, setMcqAns] = useState("");
+  const [refQ, setRefQ] = useState("");
+  const [imgQ, setImgQ] = useState("");
 
   // MCQ questions list
   const initialMcq = isEdit
     ? initial?.questions
-        .filter((q: QuestionPayload) => q.question_type === 'mcq')
+        .filter((q: QuestionPayload) => q.question_type === "mcq")
         .map((q: QuestionPayload) => ({
           question: q.question,
-          options: q.options ?? { a: '', b: '', c: '', d: '' },
-          correct_answer: q.correct_answer ?? ''
+          options: q.options ?? { a: "", b: "", c: "", d: "" },
+          correct_answer: q.correct_answer ?? "",
         }))
-    : [{ question: '', options: {a:'',b:'',c:'',d:''}, correct_answer: '' }];
-  const [mcqList, setMcqList] = useState(initialMcq || [{ question: '', options: {a:'',b:'',c:'',d:''}, correct_answer: '' }]);
+    : [
+        {
+          question: "",
+          options: { a: "", b: "", c: "", d: "" },
+          correct_answer: "",
+        },
+      ];
+  const [mcqList, setMcqList] = useState(
+    initialMcq || [
+      {
+        question: "",
+        options: { a: "", b: "", c: "", d: "" },
+        correct_answer: "",
+      },
+    ]
+  );
 
-const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
+  const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-  Papa.parse(file, {
-    complete: (result) => {
-      const parsed = result.data as string[][];
-      const cleaned = parsed
-        .filter(row => row.length >= 6)
-        .map(row => ({
-          question: row[0]?.trim(),
-          options: {
-            a: row[1]?.trim(),
-            b: row[2]?.trim(),
-            c: row[3]?.trim(),
-            d: row[4]?.trim(),
-          },
-          correct_answer: row[5]?.trim().toLowerCase(),
-        }));
-      setMcqList(cleaned);
-    },
-    skipEmptyLines: true,
-  });
-};
-    const [index, setIndex] = useState<number>(initial?.index || 1);
+    Papa.parse(file, {
+      complete: (result) => {
+        const parsed = result.data as string[][];
+        const cleaned = parsed
+          .filter((row) => row.length >= 6)
+          .map((row) => ({
+            question: row[0]?.trim(),
+            options: {
+              a: row[1]?.trim(),
+              b: row[2]?.trim(),
+              c: row[3]?.trim(),
+              d: row[4]?.trim(),
+            },
+            correct_answer: row[5]?.trim().toLowerCase(),
+          }));
+        setMcqList(cleaned);
+      },
+      skipEmptyLines: true,
+    });
+  };
+  const [index, setIndex] = useState<number>(initial?.index || 1);
   // Reflection/Image question
   const initialSingle = isEdit
-    ? initial?.questions.find(q => q.question_type !== 'mcq')?.question ?? ''
-    : '';
+    ? initial?.questions.find((q) => q.question_type !== "mcq")?.question ?? ""
+    : "";
   const [singleQ, setSingleQ] = useState(initialSingle);
 
   // add or remove MCQ entries
   const addMcq = () => {
     if (mcqList.length < 5) {
-      setMcqList([...mcqList, { question: '', options: {a:'',b:'',c:'',d:''}, correct_answer: '' }]);
+      setMcqList([
+        ...mcqList,
+        {
+          question: "",
+          options: { a: "", b: "", c: "", d: "" },
+          correct_answer: "",
+        },
+      ]);
     }
   };
   const removeMcq = (idx: number) => {
@@ -109,8 +131,8 @@ const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
 
   // dropdown data
   const [subjects, setSubjects] = useState<any[]>([]);
-  const [levels,   setLevels]   = useState<any[]>([]);
-  const [loading,  setLoading]  = useState(false);
+  const [levels, setLevels] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
   // load subjects, levels and prefill when editing
   useEffect(() => {
@@ -171,17 +193,23 @@ const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     }
   }, [isEdit, initial]);
 
-
   const handleSave = async () => {
     setLoading(true);
 
     const questions: QuestionPayload[] = [];
-    if (questionType === 'mcq') {
-      mcqList.forEach((q: { question: any; options: any; correct_answer: any; }) => {
-        if (q.question) {
-          questions.push({ question_type: 'mcq', question: q.question, options: q.options, correct_answer: q.correct_answer });
+    if (questionType === "mcq") {
+      mcqList.forEach(
+        (q: { question: any; options: any; correct_answer: any }) => {
+          if (q.question) {
+            questions.push({
+              question_type: "mcq",
+              question: q.question,
+              options: q.options,
+              correct_answer: q.correct_answer,
+            });
+          }
         }
-      });
+      );
     } else {
       questions.push({ question_type: questionType, question: singleQ });
     }
@@ -191,35 +219,37 @@ const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       setLoading(false);
       return;
     }
-    
+
     const payload = {
       title,
-      description:  desc,
+      description: desc,
       youtube_url: you,
-      allow_for:   forAll,
-      subject_id:  subj,
-      level_id:    lvl,
-      status:      stat,
+      allow_for: forAll,
+      subject_id: subj,
+      level_id: lvl,
+      status: stat,
       index: Number(index) || 1,
-      questions
+      questions,
     };
 
-    const url    = isEdit ? `${api_startpoint}/api/visions/${initial!.vision_id}` : `${api_startpoint}/api/visions`;
-    const method = isEdit ? 'PUT' : 'POST';
+    const url = isEdit
+      ? `${api_startpoint}/api/visions/${initial!.vision_id}`
+      : `${api_startpoint}/api/visions`;
+    const method = isEdit ? "PUT" : "POST";
 
-console.log(payload)
+    console.log(payload);
 
     const res = await fetch(url, {
-      method, 
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify(payload)
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
 
     if (res.ok) {
       onSuccess();
       onClose();
     } else {
-      alert('Save failed');
+      alert("Save failed");
     }
     setLoading(false);
   };
@@ -466,247 +496,335 @@ console.log(payload)
   );
 }
 
-
 interface VisionRow {
-    vision_id: number
-    title: string
-    description: string
-    youtube_url: string | null
-    allow_for: 1 | 2 | 3
-    subject_id: number  // Changed: Made this required number instead of optional string
-    subject: string
-    level: string
-    level_id: number    // Changed: Made this required number instead of optional string
-    status: number
-    index?: number
-    questions: QuestionPayload[]
+  vision_id: number;
+  title: string;
+  description: string;
+  youtube_url: string | null;
+  allow_for: 1 | 2 | 3;
+  subject_id: number;
+  subject: string;
+  level: string;
+  level_id: number;
+  status: number;
+  index?: number;
+  questions: QuestionPayload[];
 }
 
 export default function VisionsPage() {
-    const [rows, setRows] = useState<VisionRow[]>([]);
-    const [loading, setLoading] = useState(false);
-  
-    // Filters
-    const [fStatus, setFStatus] = useState<string>('');
-    const [fSubject, setFSubject] = useState<string>('');
-    const [fLevel,   setFLevel]   = useState<string>('');
-    // const [fType,    setFType]    = useState<string>('');
-    const [expanded, setExpanded] = useState<Record<number,boolean>>({})
+  const [rows, setRows] = useState<VisionRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [fStatus, setFStatus] = useState<string>("");
+  const [fSubject, setFSubject] = useState<string>("");
+  const [fLevel, setFLevel] = useState<string>("");
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  const [showAdd, setShowAdd] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editRow, setEditRow] = useState<VisionRow | null>(null);
+  const totalCount = rows.length;
+  const [subjects, setSubjects] = useState<any[]>([]);
+  const [levels, setLevels] = useState<any[]>([]);
+  // Delete modal state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [visionToDelete, setVisionToDelete] = useState<VisionRow | null>(null);
 
-    // Modal states
-    const [showAdd, setShowAdd] = useState(false);
-    const [showEdit, setShowEdit] = useState(false);
-    const [editRow, setEditRow] = useState<VisionRow | null>(null);
-  
-    // counts
-    const totalCount = rows.length;
-  
-    // Fetch data
-    async function fetchVisions() {
-      setLoading(true);
-      const params = new URLSearchParams();
-      if (fStatus)  params.set('status', fStatus);
-      if (fSubject) params.set('subject_id', fSubject);
-      if (fLevel)   params.set('level_id', fLevel);
-      // if (fType)    params.set('question_type', fType);
-  
-      const res = await fetch(`${api_startpoint}/api/visions?${params}`);
-      const data: VisionRow[] = await res.json();
-      setRows(data);
-      setLoading(false);
+  async function fetchVisions() {
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (fStatus) params.set("status", fStatus);
+    if (fSubject) params.set("subject_id", fSubject);
+    if (fLevel) params.set("level_id", fLevel);
+
+    const res = await fetch(`${api_startpoint}/api/visions?${params}`);
+    const data: VisionRow[] = await res.json();
+    setRows(data);
+    setLoading(false);
+  }
+
+  const handleDelete = async () => {
+    if (!visionToDelete) return;
+    try {
+      await fetch(`${api_startpoint}/api/visions/${visionToDelete.vision_id}`, {
+        method: "DELETE",
+      });
+      fetchVisions();
+      setShowDeleteModal(false);
+      setVisionToDelete(null);
+    } catch (error) {
+      console.error("Delete failed:", error);
+      alert("Failed to delete vision");
     }
-    
+  };
 
-    const [subjects, setSubjects] = useState<any[]>([]);
-    const [levels, setLevels] = useState<any[]>([]);
+  useEffect(() => {
+    fetchVisions();
+    fetch(`${api_startpoint}/api/subjects_list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "1" }),
+    })
+      .then((res) => res.json())
+      .then(setSubjects);
 
-    useEffect(() => { 
-        fetchVisions(); 
-        fetch(`${api_startpoint}/api/subjects_list`, { 
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({status: '1'})
-          })
-        .then(res => res.json())
-        .then(setSubjects);
+    fetch(`${api_startpoint}/api/levels`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page: 1 }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        console.log("Levels response:", data);
+        setLevels(data);
+      });
+  }, [fStatus, fSubject, fLevel]);
 
-        fetch(`${api_startpoint}/api/levels`, {
-            method: 'POST',
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ page: 1 })
-          })
-            .then(res => res.json())
-            .then(data => {
-              console.log('Levels response:', data);
-              setLevels(data);
-            });
-
-    }, [fStatus, fSubject, fLevel]);
-  
-    return (
-        <div className={`page bg-body ${inter.className} font-sans`}>
-            <Sidebar />
-            <div className="page-wrapper" style={{ marginLeft: '250px' }}>
-                <div className="page-body">
-                    <div className="container-xl pt-4 pb-4 space-y-4">
-                        <div className="card w-40">
-                            <div className="card-body">
-                                <div className="d-flex align-items-center">
-                                    <div>
-                                        <div className="subheader">Total Visions</div>
-                                        <div className="h1 mb-3">
-                                            <NumberFlow
-                                            value={totalCount}
-                                            className="fw-semi-bold text-dark"
-                                            transformTiming={{endDelay:6, duration:750, easing:'cubic-bezier(0.42, 0, 0.58, 1)'}}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        {/* Filters */}
-                        <div className="flex gap-4">
-                            <select value={fStatus} onChange={e => setFStatus(e.target.value)}
-                                    className="border p-2 rounded">
-                            <option value="">All Status</option>
-                            <option value="1">Active</option>
-                            <option value="0">Inactive</option>
-                            </select>
-                            <select value={fSubject} onChange={e => setFSubject(e.target.value)}
-                                    className="border p-2 rounded">
-                                <option value="">All Subjects</option>
-                                {subjects.map((subject) => (
-                                    <option key={subject.id} value={String(subject.id)}>
-                                        {JSON.parse(subject.title).en}
-                                    </option>
-                                ))}
-                            </select>
-                            <select value={fLevel} onChange={e => setFLevel(e.target.value)}
-                                    className="border p-2 rounded">
-                                <option value="">All Levels</option>
-                                {levels.map((level) => (
-                                    <option key={level.id} value={String(level.id)}>
-                                        {JSON.parse(level.title).en}
-                                    </option>
-                                ))}
-                            </select>
-
-                            <button onClick={() => setShowAdd(true)}
-                                    className="ml-auto bg-sky-600 text-white px-4 py-2 rounded">
-                            Add Vision
-                            </button>
-                        </div>
-                        {/* Table */}
-                        {loading ? (
-                            <div className="w-90 h-90 text-center">
-                                <div className=' animate-spin rounded-full w-12 h-12 border-t-2 border-sky-800 text-center'></div>
-                            </div>
-                        ) : (
-                            <table className="w-full table-auto border">
-                            <thead>
-                                <tr className="bg-gray-100">
-                                <th className="p-2 border">Vision ID</th>
-                                <th className="p-2 border">Title</th>
-                                <th className="p-2 border">Description</th>
-                                <th className="p-2 border">YouTube</th>
-                                <th className="p-2 border">Allow For</th>
-                                <th className="p-2 border">Subject</th>
-                                <th className="p-2 border">Level</th>
-                                <th className="p-2 border">Status</th>
-                                <th className='p-2 border'>Details</th>
-                                <th className="p-2 border">Index</th>
-                                <th className="p-2 border">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {rows.map(r => (
-                                  <React.Fragment key={r.vision_id}>
-                                    <tr >
-                                      <td className="p-2 border">{r.vision_id}</td>
-                                      <td className="p-2 border">{r.title}</td>
-                                      <td className="p-2 border">{r.description}</td>
-                                      <td className="p-2 border">
-                                      {r.youtube_url ? <a href={r.youtube_url} target="_blank">Link</a> : '-'}
-                                      </td>
-                                      <td className="p-2 border">
-                                      {r.allow_for === 1 ? 'All' : r.allow_for === 2 ? 'Teacher' : 'Student'}
-                                      </td>
-                                      <td className="p-2 border">{r.subject}</td>
-                                      <td className="p-2 border">{r.level}</td>
-                                      <td className="p-2 border">
-                                      {r.status===1?'Active':'Inactive'}
-                                      </td>
-                                      <td className="border p-2">
-                                        <button
-                                          onClick={()=>setExpanded(e=>({ ...e, [r.vision_id]: !e[r.vision_id] }))}
-                                          className="text-blue-600 underline"
-                                        >
-                                          {expanded[r.vision_id] ? 'Hide Details' : 'Show Details'}
-                                        </button>
-                                      </td>
-                                      <td className="p-2 border">{r.index || '-'}</td> 
-                                      <td className="p-2 border flex gap-2 justify-center">
-                                        {/* Edit/Delete icons */}
-                                        <IconEdit onClick={() => { setEditRow(r); setShowEdit(true);} }
-                                                className="text-blue-600"/>
-                                        <IconTrash onClick={async ()=>{
-                                            await fetch(`${api_startpoint}/api/visions/${r.vision_id}`, {method:'DELETE'});
-                                            fetchVisions();
-                                        }}
-                                                className="text-red-600"/>
-                                      </td>
-                                    </tr>
-                                        
-                                      {expanded[r.vision_id] && (
-                                        <tr>
-                                          <td colSpan={5} className="bg-gray-50 p-4">
-                                            {/* List each question */}
-                                            {r.questions.map(q => (
-                                              <div key={q.question_id} className="mb-4 border-b pb-2">
-                                                <div className="font-semibold">
-                                                  [{q.question_type.toUpperCase()} Question] {q.question} 
-                                                </div>
-                                                {q.question_type === 'mcq' && q.options && (
-                                                  <ul className="list-disc ml-6">
-                                                    {Object.entries(q.options).map(([k,opt]) => (
-                                                      <li key={k}>
-                                                        {k.toUpperCase()}: {opt}
-                                                        {q.correct_answer === k && <strong> (Correct)</strong>}
-                                                      </li>
-                                                    ))}
-                                                  </ul>
-                                                )}
-                                              </div>
-                                            ))}
-                                          </td>
-                                        </tr>
-                                      )}
-                                  </React.Fragment>
-                                ))}
-                            </tbody>
-                            </table>
-                        )}
-                        {/* Add Modal */}
-                        {showAdd && (
-                            <AddEditModal
-                            mode="add"
-                            onClose={()=>setShowAdd(false)}
-                            onSuccess={()=>{setShowAdd(false); fetchVisions();}}
-                            />
-                        )}
-                        {/* Edit Modal */}
-                        {showEdit && editRow && (
-                            <AddEditModal
-                            mode="edit"
-                            initial={editRow}
-                            onClose={()=>{setShowEdit(false); setEditRow(null);}}
-                            onSuccess={()=>{setShowEdit(false); fetchVisions();}}
-                            />
-                        )}
+  return (
+    <div className={`page bg-body ${inter.className} font-sans`}>
+      <Sidebar />
+      <div className="page-wrapper" style={{ marginLeft: "250px" }}>
+        <div className="page-body">
+          <div className="container-xl pt-4 pb-4 space-y-4">
+            <div className="card w-40">
+              <div className="card-body">
+                <div className="d-flex align-items-center">
+                  <div>
+                    <div className="subheader">Total Visions</div>
+                    <div className="h1 mb-3">
+                      <NumberFlow
+                        value={totalCount}
+                        className="fw-semi-bold text-dark"
+                        transformTiming={{
+                          endDelay: 6,
+                          duration: 750,
+                          easing: "cubic-bezier(0.42, 0, 0.58, 1)",
+                        }}
+                      />
                     </div>
+                  </div>
                 </div>
+              </div>
             </div>
+            <div className="flex gap-4">
+              <select
+                value={fStatus}
+                onChange={(e) => setFStatus(e.target.value)}
+                className="border p-2 rounded"
+              >
+                <option value="">All Status</option>
+                <option value="1">Active</option>
+                <option value="0">Inactive</option>
+              </select>
+              <select
+                value={fSubject}
+                onChange={(e) => setFSubject(e.target.value)}
+                className="border p-2 rounded"
+              >
+                <option value="">All Subjects</option>
+                {subjects.map((subject) => (
+                  <option key={subject.id} value={String(subject.id)}>
+                    {JSON.parse(subject.title).en}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={fLevel}
+                onChange={(e) => setFLevel(e.target.value)}
+                className="border p-2 rounded"
+              >
+                <option value="">All Levels</option>
+                {levels.map((level) => (
+                  <option key={level.id} value={String(level.id)}>
+                    {JSON.parse(level.title).en}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={() => setShowAdd(true)}
+                className="ml-auto bg-sky-600 text-white px-4 py-2 rounded"
+              >
+                Add Vision
+              </button>
+            </div>
+            {loading ? (
+              <div className="w-90 h-90 text-center">
+                <div className=" animate-spin rounded-full w-12 h-12 border-t-2 border-sky-800 text-center"></div>
+              </div>
+            ) : (
+              <table className="w-full table-auto border">
+                <thead>
+                  <tr className="bg-gray-100">
+                    <th className="p-2 border">Vision ID</th>
+                    <th className="p-2 border">Title</th>
+                    <th className="p-2 border">Description</th>
+                    <th className="p-2 border">YouTube</th>
+                    <th className="p-2 border">Allow For</th>
+                    <th className="p-2 border">Subject</th>
+                    <th className="p-2 border">Level</th>
+                    <th className="p-2 border">Status</th>
+                    <th className="p-2 border">Details</th>
+                    <th className="p-2 border">Index</th>
+                    <th className="p-2 border">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <React.Fragment key={r.vision_id}>
+                      <tr>
+                        <td className="p-2 border">{r.vision_id}</td>
+                        <td className="p-2 border">{r.title}</td>
+                        <td className="p-2 border">{r.description}</td>
+                        <td className="p-2 border">
+                          {r.youtube_url ? (
+                            <a href={r.youtube_url} target="_blank">
+                              Link
+                            </a>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                        <td className="p-2 border">
+                          {r.allow_for === 1
+                            ? "All"
+                            : r.allow_for === 2
+                            ? "Teacher"
+                            : "Student"}
+                        </td>
+                        <td className="p-2 border">{r.subject}</td>
+                        <td className="p-2 border">{r.level}</td>
+                        <td className="p-2 border">
+                          {r.status === 1 ? "Active" : "Inactive"}
+                        </td>
+                        <td className="border p-2">
+                          <button
+                            onClick={() =>
+                              setExpanded((e) => ({
+                                ...e,
+                                [r.vision_id]: !e[r.vision_id],
+                              }))
+                            }
+                            className="text-blue-600 underline cursor-pointer"
+                          >
+                            {expanded[r.vision_id]
+                              ? "Hide Details"
+                              : "Show Details"}
+                          </button>
+                        </td>
+                        <td className="p-2 border">{r.index || "-"}</td>
+                        <td className="p-2 border flex gap-2 justify-center">
+                          <IconEdit
+                            onClick={() => {
+                              setEditRow(r);
+                              setShowEdit(true);
+                            }}
+                            className="text-blue-600 cursor-pointer"
+                          />
+                          <IconTrash
+                            onClick={() => {
+                              setVisionToDelete(r);
+                              setShowDeleteModal(true);
+                            }}
+                            className="text-red-600 cursor-pointer"
+                          />
+                        </td>
+                      </tr>
+
+                      {expanded[r.vision_id] && (
+                        <tr>
+                          <td colSpan={5} className="bg-gray-50 p-4">
+                            {r.questions.map((q) => (
+                              <div
+                                key={q.question_id}
+                                className="mb-4 border-b pb-2"
+                              >
+                                <div className="font-semibold">
+                                  [{q.question_type.toUpperCase()} Question]{" "}
+                                  {q.question}
+                                </div>
+                                {q.question_type === "mcq" && q.options && (
+                                  <ul className="list-disc ml-6">
+                                    {Object.entries(q.options).map(
+                                      ([k, opt]) => (
+                                        <li key={k}>
+                                          {k.toUpperCase()}: {opt}
+                                          {q.correct_answer === k && (
+                                            <strong> (Correct)</strong>
+                                          )}
+                                        </li>
+                                      )
+                                    )}
+                                  </ul>
+                                )}
+                              </div>
+                            ))}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {showAdd && (
+              <AddEditModal
+                mode="add"
+                onClose={() => setShowAdd(false)}
+                onSuccess={() => {
+                  setShowAdd(false);
+                  fetchVisions();
+                }}
+              />
+            )}
+            {showEdit && editRow && (
+              <AddEditModal
+                mode="edit"
+                initial={editRow}
+                onClose={() => {
+                  setShowEdit(false);
+                  setEditRow(null);
+                }}
+                onSuccess={() => {
+                  setShowEdit(false);
+                  fetchVisions();
+                }}
+              />
+            )}
+          </div>
         </div>
-    );
+      </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && visionToDelete && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50"
+          style={{ marginLeft: "250px" }}
+        >
+          <div className="bg-white rounded-xl shadow p-6 w-full max-w-md">
+            <h2 className="text-lg font-semibold mb-4">Confirm Deletion</h2>
+            <p>
+              Are you sure you want to delete{" "}
+              <strong>{visionToDelete.title}</strong>?
+            </p>
+            <div className="flex justify-end gap-4 mt-6">
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setVisionToDelete(null);
+                }}
+                className="px-4 py-1 rounded border border-gray-400"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                className="px-4 py-1 rounded bg-red-600 text-white"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
