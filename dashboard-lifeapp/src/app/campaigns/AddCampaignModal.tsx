@@ -13,6 +13,7 @@ const inter = Inter({ subsets: ["latin"] });
 // const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
 const api_startpoint = "http://152.42.239.141:5000";
 
+
 // Helper to safely parse JSON title
 function safeParseTitle(jsonString: string): string {
   if (typeof jsonString !== "string") {
@@ -247,14 +248,15 @@ export default function AddCampaignModal({
   };
 
   const handleSave = async () => {
-    const url = `${api_startpoint}/api/campaigns`;
-    const method = "POST";
-
+    const url = isEdit
+      ? `${api_startpoint}/api/campaigns/${initial!.id}`
+      : `${api_startpoint}/api/campaigns`;
+    const method = isEdit ? "PUT" : "POST";
     let fetchOpts: RequestInit;
 
     if (image) {
       const fd = new FormData();
-      fd.append("campaign_title", title);
+      fd.append("title", title); // Fixed field name
       fd.append("description", description);
       fd.append("status", String(status));
       fd.append("game_type", String(gameType));
@@ -282,7 +284,7 @@ export default function AddCampaignModal({
       fetchOpts = { method, body: fd };
     } else {
       const payload: any = {
-        campaign_title: title,
+        title: title, // Fixed field name
         description,
         status,
         game_type: gameType,
