@@ -1,16 +1,21 @@
+
 # app.py
 from binascii import Error
 import csv
 import io
 import math
+import requests 
 from flask import Flask, Response, json, jsonify, request
 from flask_cors import CORS
 import pymysql.cursors
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
+from collections import defaultdict
 from typing import Optional, Dict, Any, List, Union
 import logging
 from werkzeug.utils import secure_filename
 from flask import session
+  # Added import
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,21 +33,11 @@ import uuid
 import boto3
 
 # Load environment variables from .env file
-env_path = Path('.') / '.env'
-load_dotenv()
 # env_path = Path(__file__).resolve().parent / '.local.env'
 # load_dotenv(dotenv_path=env_path)
 
-# def get_db_connection():
-#     return pymysql.connect(
-#         host='localhost',  # Your MySQL host
-#         port=3306,             # MySQL port
-#         user='root',           # MySQL username
-#         password='Diamond0606***',  # MySQL password
-#         database='lifeapp',    # Database name
-#         cursorclass=pymysql.cursors.DictCursor
-#     )
-
+env_path = Path('.') / '.env'
+load_dotenv()
 
 # DigitalOcean Spaces Config
 DO_SPACES_KEY = os.getenv('DO_SPACES_KEY')
@@ -51,14 +46,6 @@ DO_SPACES_REGION = os.getenv('DO_SPACES_REGION')
 DO_SPACES_BUCKET = os.getenv('DO_SPACES_BUCKET')
 DO_SPACES_ENDPOINT = os.getenv('DO_SPACES_ENDPOINT')
 
-# Initialize Boto3 Client
-# s3_client = boto3.client(
-#     "s3",
-#     endpoint_url=DO_SPACES_ENDPOINT,
-#     aws_access_key_id=DO_SPACES_KEY,
-#     aws_secret_access_key=DO_SPACES_SECRET,
-# )
-
 
 def get_db_connection():
     host=os.getenv('DB_HOST', '139.59.84.157')
@@ -66,25 +53,14 @@ def get_db_connection():
     user=os.getenv('DB_USERNAME', 'root')
     password=os.getenv('DB_PASSWORD', 'LIFELAB@1server')
     database=os.getenv('DB_DATABASE', 'lifeapp')
-    # print(host,port,user,password,database)
     return pymysql.connect(
-        host = host,  # Fallback to 'localhost'
-        port = port,     # Fallback to 3306
-        user = user,        # Fallback to 'root'
-        password=password,    # Fallback to empty
+        host = host,
+        port = port,
+        user = user,
+        password=password,
         database=database,
         cursorclass=pymysql.cursors.DictCursor
     )
-
-# def get_db_connection():
-#     return pymysql.connect(
-#         host=os.getenv('DB_HOST', 'localhost'),
-#         port=int(os.getenv('DB_PORT', 3306)),
-#         user=os.getenv('DB_USERNAME', 'root'),
-#         password=os.getenv('DB_PASSWORD', ''),
-#         database=os.getenv('DB_DATABASE', 'lifeapp'),
-#         cursorclass=pymysql.cursors.DictCursor
-#     )
 
 
 @app.route('/api/login', methods=['POST'])
@@ -2813,30 +2789,30 @@ def mission_search():
         print(f"🟡 Filter: mobile_no={mobile_no}")
 
     count_sql = f"SELECT COUNT(*) AS total FROM ({sql}) AS sub"
-    print(f"📊 Count SQL: {count_sql}")
-    print(f"📊 Count Params: {params}")
+    print(f" Count SQL: {count_sql}")
+    print(f" Count Params: {params}")
 
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            print("🔎 Executing count query...")
+            print(" Executing count query...")
             cursor.execute(count_sql, tuple(params))
             total = cursor.fetchone()['total']
-            print(f"✅ Total rows: {total}")
+            print(f" Total rows: {total}")
 
         page_sql = sql + " ORDER BY cte.Requested_At DESC LIMIT %s OFFSET %s"
         page_params = params + [per_page, offset]
-        print(f"📄 Page SQL: {page_sql}")
-        print(f"📄 Page Params: {page_params}")
+        print(f" Page SQL: {page_sql}")
+        print(f" Page Params: {page_params}")
 
         with connection.cursor() as cursor:
-            print("🔎 Executing page query...")
+            print(" Executing page query...")
             cursor.execute(page_sql, tuple(page_params))
             rows = cursor.fetchall()
             base_url = os.getenv('BASE_URL')
             for r in rows:
                 r['media_url'] = f"{base_url}/{r['media_path']}" if r.get('media_path') else None
-            print(f"✅ Rows fetched: {len(rows)}")
+            print(f" Rows fetched: {len(rows)}")
 
         return jsonify({
             'data': rows,
@@ -2849,11 +2825,11 @@ def mission_search():
         })
 
     except Exception as e:
-        print(f"❌ Error occurred: {e}")
+        print(f" Error occurred: {e}")
         return jsonify({'error': str(e)}), 500
     finally:
         connection.close()
-        print("🔚 Connection closed.")
+        print(" Connection closed.")
 
 @app.route('/api/update_mission_status', methods=['POST'])
 def update_mission_status():
@@ -2863,10 +2839,10 @@ def update_mission_status():
     student_id = data.get('student_id')
     action = data.get('action')
 
-    print(f"📥 Received mission status update: row_id={row_id}, mission_id={mission_id}, student_id={student_id}, action={action}")
+    print(f" Received mission status update: row_id={row_id}, mission_id={mission_id}, student_id={student_id}, action={action}")
 
     if not all([row_id, student_id, action]):
-        print("❌ Missing parameters")
+        print(" Missing parameters")
         return jsonify({'error': 'Missing parameters'}), 400
 
     conn = get_db_connection()
@@ -2875,15 +2851,15 @@ def update_mission_status():
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             if action == 'approve':
-                # 1️⃣ mark approved
-                print("✅ Marking mission as approved...")
+                # 1 mark approved
+                print(" Marking mission as approved...")
                 cursor.execute("""
                     UPDATE la_mission_completes
                     SET approved_at = %s, rejected_at = NULL
                     WHERE id = %s AND user_id = %s
                 """, (now, row_id, student_id))
 
-                # 2️⃣ fetch mission details
+                # 2️fetch mission details
                 cursor.execute("""
                     SELECT
                         lm.la_level_id,
@@ -2908,11 +2884,11 @@ def update_mission_status():
                     else:
                         mission_points = 0
 
-                    print(f"🪙 Mission points resolved: {mission_points} for mission_type {mission_type}")
+                    print(f" Mission points resolved: {mission_points} for mission_type {mission_type}")
 
                     if mission_points and mission_points > 0:
                         # insert coin transaction
-                        print("💰 Inserting coin transaction...")
+                        print(" Inserting coin transaction...")
                         cursor.execute("""
                             INSERT INTO coin_transactions
                                 (user_id, type, amount, coinable_type, coinable_id, created_at, updated_at)
@@ -2929,7 +2905,7 @@ def update_mission_status():
                         ))
 
                         # update user coins
-                        print("🔄 Updating user earn_coins...")
+                        print(" Updating user earn_coins...")
                         cursor.execute("""
                             UPDATE users
                             SET earn_coins = earn_coins + %s,
@@ -2937,8 +2913,8 @@ def update_mission_status():
                             WHERE id = %s
                         """, (mission_points, now, student_id))
 
-                        # ✅ store points in la_mission_completes
-                        print("✍  Updating la_mission_completes.points...")
+                        #  store points in la_mission_completes
+                        print("  Updating la_mission_completes.points...")
                         cursor.execute("""
                             UPDATE la_mission_completes
                             SET points = %s, updated_at = %s
@@ -2947,10 +2923,10 @@ def update_mission_status():
                     else:
                         print("⚠  mission_points evaluated as 0 — skipping coin transaction.")
                 else:
-                    print("❌ Could not fetch mission details.")
+                    print(" Could not fetch mission details.")
 
             elif action == 'reject':
-                print("⛔ Marking mission as rejected...")
+                print("Marking mission as rejected...")
                 cursor.execute("""
                     UPDATE la_mission_completes
                     SET rejected_at = %s, approved_at = NULL
@@ -2979,6 +2955,23 @@ def update_mission_status():
 ###################################################################################
 
 # 5. Fetch Vision Session Answers with Pagination & Filters
+ # Add this import at the top
+
+
+def notify_vision_status(vision_id, user_id, status):
+    """Helper function to notify vision status via API"""
+    try:
+        response = requests.post(
+            f"https://api.life-lab.org/v3/visions/{vision_id}/notify",
+            json={"status": status, "user_id": user_id},
+            timeout=5
+        )
+        print(f"Notification response: {response.json()}")
+        return True
+    except Exception as e:
+        print(f"Notification error: {e}")
+        return False
+
 @app.route('/api/vision_sessions', methods=['GET'])
 def fetch_vision_sessions():
     qs          = request.args
@@ -2990,7 +2983,7 @@ def fetch_vision_sessions():
     date_start  = qs.get('date_start')
     date_end    = qs.get('date_end')
     school_codes = qs.getlist('school_codes')
-    status_filt = qs.get('status')   # NEW: 'requested'|'approved'|'rejected'
+    status_filt = qs.get('status')   # 'requested'|'approved'|'rejected'
 
     base_sql = '''
     SELECT
@@ -3005,9 +2998,9 @@ def fetch_vision_sessions():
       m.path         AS media_path,
       a.score,
       a.answer_type,
-      a.status,             -- NEW
-      a.approved_at,        -- NEW
-      a.rejected_at,        -- NEW
+      a.status,             
+      a.approved_at,        
+      a.rejected_at,        
       a.created_at
     FROM vision_question_answers a
     JOIN visions v          ON v.id = a.vision_id
@@ -3037,7 +3030,6 @@ def fetch_vision_sessions():
         ph = ','.join(['%s']*len(school_codes))
         base_sql += f' AND u.school_code IN ({ph})'; params += school_codes
 
-    # NEW: filter by status column
     if status_filt in ('requested','approved','rejected'):
         base_sql += ' AND a.status = %s'; params.append(status_filt)
 
@@ -3068,13 +3060,11 @@ def fetch_vision_sessions():
 @app.route('/api/vision_sessions/<int:answer_id>/score', methods=['PUT'])
 def update_vision_session_score(answer_id):
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"➡️ Starting score update for answer ID: {answer_id} at {now}")
+    print(f" Starting score update for answer ID: {answer_id} at {now}")
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # Fetch answer details + its vision level
-            print("🔍 Fetching vision answer and level data...")
             cursor.execute("""
                 SELECT vqa.answer_type, vqa.vision_id, vqa.user_id, v.la_level_id
                 FROM vision_question_answers vqa
@@ -3084,21 +3074,19 @@ def update_vision_session_score(answer_id):
             row = cursor.fetchone()
             
             if not row:
-                print("❌ Vision answer not found.")
+                print(" Vision answer not found.")
                 return jsonify({'error': 'Vision answer not found'}), 404
 
             answer_type = row['answer_type']
             level_id    = row['la_level_id']
             user_id     = row['user_id']
 
-            print(f"✅ Fetched: answer_type={answer_type}, level_id={level_id}, user_id={user_id}")
+            print(f"Fetched: answer_type={answer_type}, level_id={level_id}, user_id={user_id}")
 
             if answer_type not in ('text', 'image'):
-                print("❌ Invalid answer type for admin approval.")
+                print(" Invalid answer type for admin approval.")
                 return jsonify({'error': 'Only text/image answers can be approved from admin panel'}), 400
 
-            # get text/image vision points dynamically
-            print("🔍 Fetching vision points from la_levels...")
             cursor.execute("""
                 SELECT vision_text_image_points
                 FROM la_levels
@@ -3106,23 +3094,19 @@ def update_vision_session_score(answer_id):
             """, (level_id,))
             level = cursor.fetchone()
             if not level:
-                print("❌ Level not found.")
+                print("Level not found.")
                 return jsonify({'error': 'Level not found'}), 404
 
             score = level['vision_text_image_points']
-            print(f"✅ Vision points for level: {score}")
+            print(f" Vision points for level: {score}")
 
-            # Step 1: update the vision_question_answers score
-            print("📝 Updating vision_question_answers with score...")
             cursor.execute("""
                 UPDATE vision_question_answers
                 SET score = %s, updated_at = %s
                 WHERE id = %s
             """, (score, now, answer_id))
-            print("✅ Score updated.")
+            print(" Score updated.")
 
-            # Step 2: insert coin transaction
-            print("💰 Inserting coin transaction...")
             cursor.execute("""
                 INSERT INTO coin_transactions (user_id, type, amount, coinable_type, coinable_id, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -3135,29 +3119,26 @@ def update_vision_session_score(answer_id):
                 now,
                 now
             ))
-            print("✅ Coin transaction inserted.")
+            print(" Coin transaction inserted.")
 
-            # Step 3: update user’s earn_coins
-            print("🔁 Updating user's earn_coins...")
             cursor.execute("""
                 UPDATE users
                 SET earn_coins = earn_coins + %s,
                     updated_at = %s
                 WHERE id = %s
             """, (score, now, user_id))
-            print("✅ User's coins updated.")
+            print(" User's coins updated.")
 
             conn.commit()
-            print("🎉 All updates committed successfully.")
+            print("All updates committed successfully.")
             return jsonify({'success': True, 'coins_awarded': score}), 200
 
     except Exception as e:
-        print(f"❌ Exception occurred: {e}")
+        print(f" Exception occurred: {e}")
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
-        print("🔒 Database connection closed.")
-
+        print(" Database connection closed.")
 
 @app.route('/api/vision_sessions/<int:answer_id>/status', methods=['PUT'])
 def update_vision_session_status(answer_id):
@@ -3166,64 +3147,73 @@ def update_vision_session_status(answer_id):
     print(f"Received status update request for answer_id={answer_id}, new_status={new_status}")
 
     if new_status not in ('approved', 'rejected'):
-        print("❌ Invalid status")
+        print(" Invalid status")
         return jsonify({'error': 'Invalid status'}), 400
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    if new_status == 'approved':
-        sql = "UPDATE vision_question_answers SET status=%s, approved_at=%s WHERE id=%s"
-        params = (new_status, now, answer_id)
-        vision_user_status = 'completed'
-    else:  # rejected
-        sql = "UPDATE vision_question_answers SET status=%s, rejected_at=%s WHERE id=%s"
-        params = (new_status, now, answer_id)
-        vision_user_status = 'rejected'
-
-    print(f"Executing SQL for vision_question_answers: {sql} with params: {params}")
-
     conn = get_db_connection()
+    
     try:
         with conn.cursor() as cursor:
-            # Step 1: Update vision_question_answers
-            cursor.execute(sql, params)
-            print(f"✅ vision_question_answers updated for ID {answer_id}")
-
-            # Step 2: Get user_id and vision_id
-            cursor.execute("SELECT user_id, vision_id FROM vision_question_answers WHERE id = %s", (answer_id,))
+            # FIRST: Get user_id and vision_id BEFORE updating
+            cursor.execute(
+                "SELECT user_id, vision_id FROM vision_question_answers WHERE id = %s",
+                (answer_id,)
+            )
             result = cursor.fetchone()
-            print(f"Fetched user_id and vision_id: {result}")
-
+            
             if not result:
-                print("❌ Vision answer not found in DB")
+                print(" Vision answer not found in DB")
                 return jsonify({'error': 'Vision answer not found'}), 404
 
-            # ✅ FIX: Access values by key
             user_id = result['user_id']
             vision_id = result['vision_id']
+            print(f"Fetched: user_id={user_id}, vision_id={vision_id}")
 
-            # Step 3: Update or insert into vision_user_statuses
+            # Update vision_question_answers
+            if new_status == 'approved':
+                sql = "UPDATE vision_question_answers SET status=%s, approved_at=%s WHERE id=%s"
+                params = (new_status, now, answer_id)
+                vision_user_status = 'completed'
+            else:  # rejected
+                sql = "UPDATE vision_question_answers SET status=%s, rejected_at=%s WHERE id=%s"
+                params = (new_status, now, answer_id)
+                vision_user_status = 'rejected'
+
+            cursor.execute(sql, params)
+            print(f" vision_question_answers updated for ID {answer_id}")
+
+            # Update vision_user_statuses
             status_sql = """
                 INSERT INTO vision_user_statuses (user_id, vision_id, status, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE status = %s, updated_at = %s
             """
-            print(f"Executing vision_user_statuses update: {vision_user_status}")
             cursor.execute(status_sql, (
-                user_id, vision_id, vision_user_status, now, now, vision_user_status, now
+                user_id, vision_id, vision_user_status, now, now, 
+                vision_user_status, now
             ))
 
             conn.commit()
-            print("✅ Commit successful")
-            return jsonify({'success': True, 'status': vision_user_status}), 200
+            print(" Commit successful")
+            
+            # SEND NOTIFICATION AFTER SUCCESSFUL UPDATE
+            print(f" Sending notification for vision {vision_id}, user {user_id}, status {new_status}")
+            notification_sent = notify_vision_status(vision_id, user_id, new_status)
+            
+            return jsonify({
+                'success': True, 
+                'status': vision_user_status,
+                'notification_sent': notification_sent
+            }), 200
 
     except Exception as e:
-        print(f"❌ Exception: {e}")
+        print(f" Exception: {e}")
         return jsonify({'error': str(e)}), 500
-
     finally:
         conn.close()
         print("🔚 Connection closed")
+
 
 ###################################################################################
 ###################################################################################
@@ -9437,6 +9427,7 @@ def list_campaigns():
                 c.created_at,
                 c.updated_at,
                 c.status,
+                c.ended_at,
                 media.path AS image_path
                 FROM la_campaigns c
                 LEFT JOIN lifeapp.la_missions m ON c.game_type = 1 AND m.id = c.reference_id
@@ -9462,84 +9453,9 @@ def list_campaigns():
     finally:
         conn.close()
 
-# BACKUP
-# @app.route('/api/campaigns', methods=['POST'])
-# def create_campaign():
-#     logger.info("📥 [POST] Create campaign request headers: %s", dict(request.headers))
-
-#     # 1️⃣ Determine whether the client sent form-data (with files) or raw JSON
-#     if request.content_type.startswith('multipart/form-data'):
-#         data = request.form.to_dict()
-#     else:
-#         data = request.get_json(force=True, silent=True) or {}
-#     # data = request.form.to_dict()
-#     # 2️⃣ Extract all expected fields
-#     game_type     = data.get('game_type')
-#     reference_id  = data.get('reference_id')
-#     title         = data.get('title') or data.get('campaign_title')
-#     description   = data.get('description')
-#     scheduled_for = data.get('scheduled_for')
-#     button_name   = data.get('button_name')
-#     media_id      = None # maybe provided in JSON
-
-#     # 3️⃣ Handle an uploaded image, if any
-#     image_file = request.files.get('image')
-#     if image_file and image_file.filename:
-#         logger.info(f"📷 Uploading image: {image_file.filename}")
-#         media = upload_media(image_file)
-#         media_id = media['id']
-
-#     # 4️⃣ Parse your dd-mm-YYYY string into a date
-#     try:
-#         scheduled_for_date = datetime.strptime(scheduled_for, '%d-%m-%Y').date()
-#     except (TypeError, ValueError):
-#         # fallback: maybe it’s already YYYY-mm-dd, or missing
-#         scheduled_for_date = scheduled_for
-
-#     # 5️⃣ Validate required fields
-#     if not game_type or not reference_id or not scheduled_for_date:
-#         return jsonify({
-#             'error': 'Missing required field: game_type, reference_id, and scheduled_for are all required.'
-#         }), 400
-
-#     # 6️⃣ Insert into DB
-#     sql = """
-#         INSERT INTO lifeapp.la_campaigns
-#           (game_type, reference_id, title, description, scheduled_for, button_name, media_id, created_at, updated_at)
-#         VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-#     """
-#     params = (
-#         game_type,
-#         reference_id,
-#         title,
-#         description,
-#         scheduled_for,
-#         button_name,
-#         media_id
-#     )
-
-#     conn = None
-#     try:
-#         conn = get_db_connection()
-#         with conn.cursor() as cursor:
-#             cursor.execute(sql, params)
-#             conn.commit()
-#             new_id = cursor.lastrowid
-#             logger.info("✅ Campaign created with ID %s", new_id)
-#             return jsonify({'id': new_id}), 201
-
-#     except Exception as e:
-#         logger.error("🔥 Error in POST /api/campaigns: %s", e)
-#         return jsonify({'error': str(e)}), 500
-
-#     finally:
-#         if conn:
-#             conn.close()
-
 @app.route('/api/campaigns', methods=['POST'])
 def create_campaign():
     logger.info("📥 [POST] Create campaign")
-
 
     conn = None
     try:
@@ -9592,7 +9508,6 @@ def create_campaign():
     finally:
         if conn:
             conn.close()
-
 @app.route('/api/campaigns/<int:id>', methods=['PUT'])
 def update_campaign(id):
     logger.info("✏ [PUT] Update campaign ID %s: %s", id, dict(request.form))
@@ -9606,6 +9521,7 @@ def update_campaign(id):
         description   = form.get('description')
         scheduled_for = form.get('scheduled_for')
         button_name   = form.get('button_name')
+        status_val    = int(form.get('status', 1))  # Get status and convert to int
 
         media_id = None
         image_file = request.files.get('image')
@@ -9614,6 +9530,7 @@ def update_campaign(id):
             media = upload_media(image_file)
             media_id = media['id']
 
+        # Build the SQL query
         sql = """
             UPDATE lifeapp.la_campaigns
                SET game_type     = %s,
@@ -9622,16 +9539,25 @@ def update_campaign(id):
                    description   = %s,
                    scheduled_for = %s,
                    button_name   = %s,
+                   status        = %s,
         """
-        params = [game_type, reference_id, title, description, scheduled_for, button_name]
+        params = [game_type, reference_id, title, description, scheduled_for, button_name, status_val]
 
+        # Handle media_id if present
         if media_id:
             sql += " media_id = %s,"
             params.append(media_id)
 
+        # Handle ended_at based on status
+        if status_val == 0:  # Inactive
+            sql += " ended_at = NOW(), "
+        else:
+            sql += " ended_at = NULL, "
+
         sql += " updated_at = NOW() WHERE id = %s"
         params.append(id)
 
+        # Execute the query
         conn = get_db_connection()
         with conn.cursor() as cursor:
             cursor.execute(sql, tuple(params))
@@ -9642,7 +9568,6 @@ def update_campaign(id):
     except Exception as e:
         logger.error("🔥 Error in PUT /campaigns/%s: %s", id, e)
         return jsonify({'error': str(e)}), 500
-
     finally:
         if conn:
             conn.close()
@@ -9756,6 +9681,224 @@ def quiz_list():
     finally:
         conn.close()
 
+# ————— Campaign Details Endpoint —————
+
+@app.route('/api/campaigns/<int:id>/details', methods=['GET'])
+def campaign_details(id):
+    """Fetch statistics for a specific campaign"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Fetch campaign by ID
+            cursor.execute("""
+                SELECT id, game_type, reference_id, scheduled_for, status, ended_at
+                FROM la_campaigns 
+                WHERE id = %s
+            """, (id,))
+            campaign = cursor.fetchone()
+            
+            if not campaign:
+                return jsonify({'error': 'Campaign not found'}), 404
+
+            game_type = campaign['game_type']
+            reference_id = campaign['reference_id']
+            start_date = campaign['scheduled_for']
+            
+            # Handle Vision campaigns (game_type=7)
+            if game_type == 7:
+                return handle_vision_details(conn, cursor, reference_id, start_date, campaign)
+            
+            # Handle Mission campaigns (game_type=1)
+            elif game_type == 1:
+                return handle_mission_details(conn, cursor, reference_id, start_date)
+            
+            # Return zeros for Quiz and other types
+            else:
+                return jsonify({
+                    'total_submission': 0,
+                    'total_approved': 0,
+                    'total_rejected': 0,
+                    'total_requested': 0,
+                    'total_coins_earned': 0
+                }), 200
+                
+    except Exception as e:
+        logger.error(f"Error fetching campaign details: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+# ... existing imports ...
+from datetime import datetime, timedelta, time
+from collections import defaultdict
+
+# ... existing code ...
+
+# ————— Campaign Details Functions —————
+def handle_vision_details(conn, cursor, vision_id, start_date, campaign):
+    """Calculate statistics for Vision campaigns"""
+    # Determine time period
+    start_datetime = datetime.combine(start_date, time.min)
+    end_datetime = datetime.now()
+    
+    # Use ended_at if campaign is inactive
+    if campaign['status'] == 0 and campaign['ended_at']:
+        end_datetime = campaign['ended_at']
+
+    # Get distinct users
+    cursor.execute("""
+        SELECT DISTINCT user_id 
+        FROM vision_question_answers 
+        WHERE vision_id = %s 
+          AND is_first_attempt = 1 
+          AND created_at BETWEEN %s AND %s
+    """, (vision_id, start_datetime, end_datetime))
+    user_rows = cursor.fetchall()
+    user_ids = [row['user_id'] for row in user_rows] or [0]
+
+    # Get all answers for these users
+    cursor.execute("""
+        SELECT user_id, status, score 
+        FROM vision_question_answers 
+        WHERE vision_id = %s 
+          AND is_first_attempt = 1 
+          AND user_id IN %s
+    """, (vision_id, tuple(user_ids)))
+    answer_rows = cursor.fetchall()
+
+    # Process results
+    user_status = {}
+    user_coins = defaultdict(int)
+    
+    for row in answer_rows:
+        user_id = row['user_id']
+        status = row['status']
+        score = row['score'] or 0
         
+        # Track coins for approved answers
+        if status == 'approved':
+            user_coins[user_id] += score
+            
+        # Track overall status per user
+        if user_id not in user_status:
+            user_status[user_id] = status
+        else:
+            # If any answer is rejected, mark user as rejected
+            if status == 'rejected' or user_status[user_id] == 'rejected':
+                user_status[user_id] = 'rejected'
+            # If current is requested and not rejected, mark as requested
+            elif (status == 'requested' or status is None) and user_status[user_id] != 'rejected':
+                user_status[user_id] = 'requested'
+            # Only mark as approved if all answers are approved
+            elif status == 'approved' and user_status[user_id] == 'approved':
+                user_status[user_id] = 'approved'
+
+    # Count statuses
+    total_submission = len(user_ids)
+    total_approved = sum(1 for s in user_status.values() if s == 'approved')
+    total_rejected = sum(1 for s in user_status.values() if s == 'rejected')
+    total_requested = sum(1 for s in user_status.values() if s == 'requested')
+    
+    # Calculate total coins
+    total_coins_earned = sum(user_coins.values())
+
+    return jsonify({
+        'total_submission': total_submission,
+        'total_approved': total_approved,
+        'total_rejected': total_rejected,
+        'total_requested': total_requested,
+        'total_coins_earned': total_coins_earned
+    }), 200
+
+def handle_mission_details(conn, cursor, mission_id, start_date):
+    """Calculate statistics for Mission campaigns"""
+    start_datetime = datetime.combine(start_date, time.min)
+    end_datetime = datetime.now()
+
+    # Get first submissions
+    cursor.execute("""
+        SELECT m.user_id, m.approved_at, m.rejected_at, m.points
+        FROM la_mission_completes m
+        INNER JOIN (
+            SELECT user_id, MIN(created_at) as first_submit
+            FROM la_mission_completes
+            WHERE la_mission_id = %s 
+              AND created_at BETWEEN %s AND %s
+            GROUP BY user_id
+        ) as firsts ON m.user_id = firsts.user_id AND m.created_at = firsts.first_submit
+    """, (mission_id, start_datetime, end_datetime))
+    mission_rows = cursor.fetchall()
+
+    # Process results
+    total_submission = len(mission_rows)
+    total_approved = 0
+    total_rejected = 0
+    total_requested = 0
+    total_coins_earned = 0
+
+    for row in mission_rows:
+        if row['rejected_at'] is not None:
+            total_rejected += 1
+        elif row['approved_at'] is not None:
+            total_approved += 1
+            total_coins_earned += row['points'] or 0
+        else:
+            total_requested += 1
+
+    return jsonify({
+        'total_submission': total_submission,
+        'total_approved': total_approved,
+        'total_rejected': total_rejected,
+        'total_requested': total_requested,
+        'total_coins_earned': total_coins_earned
+    }), 200
+
+@app.route('/api/campaigns/<int:id>/details', methods=['GET'])
+def get_campaign_details(id):  # Changed function name to get_campaign_details
+    """Fetch statistics for a specific campaign"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Fetch campaign by ID
+            cursor.execute("""
+                SELECT id, game_type, reference_id, scheduled_for, status, ended_at
+                FROM la_campaigns 
+                WHERE id = %s
+            """, (id,))
+            campaign = cursor.fetchone()
+            
+            if not campaign:
+                return jsonify({'error': 'Campaign not found'}), 404
+
+            game_type = campaign['game_type']
+            reference_id = campaign['reference_id']
+            start_date = campaign['scheduled_for']
+            
+            # Handle Vision campaigns (game_type=7)
+            if game_type == 7:
+                return handle_vision_details(conn, cursor, reference_id, start_date, campaign)
+            
+            # Handle Mission campaigns (game_type=1)
+            elif game_type == 1:
+                return handle_mission_details(conn, cursor, reference_id, start_date)
+            
+            # Return zeros for Quiz and other types
+            else:
+                return jsonify({
+                    'total_submission': 0,
+                    'total_approved': 0,
+                    'total_rejected': 0,
+                    'total_requested': 0,
+                    'total_coins_earned': 0
+                }), 200
+                
+    except Exception as e:
+        logger.error(f"Error fetching campaign details: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
 if __name__ == '__main__':
     app.run(debug=True,  use_reloader=True)
