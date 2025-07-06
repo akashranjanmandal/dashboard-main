@@ -3,13 +3,18 @@ import React, { useState, useEffect } from "react";
 import { Inter } from "next/font/google";
 import { Sidebar } from "@/components/ui/sidebar";
 import "@tabler/core/dist/css/tabler.min.css";
-import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
+import {
+  IconEdit,
+  IconPlus,
+  IconTrash,
+  IconInfoCircle,
+} from "@tabler/icons-react";
 import AddCampaignModal from "./AddCampaignModal";
 
 const inter = Inter({ subsets: ["latin"] });
 // const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
 // const api_startpoint = "http://localhost:5000";
-const api_startpoint = 'http://152.42.239.141:5000'
+const api_startpoint = "http://152.42.239.141:5000";
 
 interface Campaign {
   id: number;
@@ -30,12 +35,31 @@ interface Campaign {
   topic_id?: number;
 }
 
+interface CampaignStats {
+  total_submission: number;
+  total_approved: number;
+  total_rejected: number;
+  total_requested: number;
+  total_coins_earned: number;
+}
+
 export default function Campaigns() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState<
     false | { mode: "add" | "edit"; campaign?: Campaign }
   >(false);
+  const [detailsModal, setDetailsModal] = useState<{
+    open: boolean;
+    campaign: Campaign | null;
+    stats: CampaignStats | null;
+    loading: boolean;
+  }>({
+    open: false,
+    campaign: null,
+    stats: null,
+    loading: false,
+  });
   const [page, setPage] = useState<number>(1);
   const [total, setTotal] = useState<number>(0);
 
@@ -55,6 +79,21 @@ export default function Campaigns() {
     }
   };
 
+  const fetchCampaignStats = async (campaignId: number) => {
+    setDetailsModal((prev) => ({ ...prev, loading: true }));
+    try {
+      const res = await fetch(
+        `${api_startpoint}/api/campaigns/${campaignId}/details`
+      );
+      const stats = await res.json();
+      setDetailsModal((prev) => ({ ...prev, stats }));
+    } catch (err) {
+      console.error("Error fetching campaign stats:", err);
+    } finally {
+      setDetailsModal((prev) => ({ ...prev, loading: false }));
+    }
+  };
+
   useEffect(() => {
     fetchCampaigns();
   }, []);
@@ -63,6 +102,24 @@ export default function Campaigns() {
   const openEdit = (camp: Campaign) =>
     setModal({ mode: "edit", campaign: camp });
   const closeModal = () => setModal(false);
+
+  const openDetails = (campaign: Campaign) => {
+    setDetailsModal({
+      open: true,
+      campaign,
+      stats: null,
+      loading: true,
+    });
+    fetchCampaignStats(campaign.id);
+  };
+
+  const closeDetails = () =>
+    setDetailsModal({
+      open: false,
+      campaign: null,
+      stats: null,
+      loading: false,
+    });
 
   const handleDelete = async (id: number) => {
     if (!confirm("Delete this campaign?")) return;
@@ -111,6 +168,7 @@ export default function Campaigns() {
                         "Scheduled",
                         "Created",
                         "Updated",
+                        // "Details",
                         "Actions",
                       ].map((h) => (
                         <th key={h}>{h}</th>
@@ -141,6 +199,16 @@ export default function Campaigns() {
                         <td>{c.scheduled_for}</td>
                         <td>{c.created_at}</td>
                         <td>{c.updated_at}</td>
+
+                        {/* <td>
+                          <button
+                            className="btn btn-sm btn-outline-primary"
+                            onClick={() => openDetails(c)}
+                          >
+                            View Stats
+                          </button>
+                        </td>
+                         */}
                         <td className="flex gap-2">
                           <IconEdit
                             className="cursor-pointer"
@@ -191,6 +259,82 @@ export default function Campaigns() {
                 fetchCampaigns();
               }}
             />
+          )}
+
+          {/* Campaign Details Modal */}
+          {detailsModal.open && (
+            <div
+              className="modal d-block"
+              tabIndex={-1}
+              style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
+            >
+              <div className="modal-dialog modal-dialog-centered">
+                <div className="modal-content">
+                  <div className="modal-header">
+                    <h5 className="modal-title">
+                      {detailsModal.campaign?.campaign_title} Statistics
+                    </h5>
+                    <button
+                      type="button"
+                      className="btn-close"
+                      onClick={closeDetails}
+                    ></button>
+                  </div>
+                  <div className="modal-body">
+                    {detailsModal.loading ? (
+                      <div className="text-center py-4">
+                        <div
+                          className="spinner-border text-purple"
+                          role="status"
+                          style={{ width: "3rem", height: "3rem" }}
+                        >
+                          <span className="visually-hidden">Loading...</span>
+                        </div>
+                        <p className="mt-3">Loading campaign statistics...</p>
+                      </div>
+                    ) : detailsModal.stats ? (
+                      <div className="space-y-3">
+                        <div className="d-flex justify-content-between">
+                          <span className="fw-bold">Total Submissions:</span>
+                          <span>{detailsModal.stats.total_submission}</span>
+                        </div>
+                        <div className="d-flex justify-content-between">
+                          <span className="fw-bold">Approved:</span>
+                          <span>{detailsModal.stats.total_approved}</span>
+                        </div>
+                        <div className="d-flex justify-content-between">
+                          <span className="fw-bold">Rejected:</span>
+                          <span>{detailsModal.stats.total_rejected}</span>
+                        </div>
+                        <div className="d-flex justify-content-between">
+                          <span className="fw-bold">Pending Review:</span>
+                          <span>{detailsModal.stats.total_requested}</span>
+                        </div>
+                        <div className="d-flex justify-content-between border-top pt-2">
+                          <span className="fw-bold">Total Coins Earned:</span>
+                          <span className="text-success fw-bold">
+                            {detailsModal.stats.total_coins_earned}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-4 text-danger">
+                        Failed to load campaign statistics
+                      </div>
+                    )}
+                  </div>
+                  <div className="modal-footer">
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={closeDetails}
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>
