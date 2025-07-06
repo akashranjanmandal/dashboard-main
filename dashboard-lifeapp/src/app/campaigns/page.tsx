@@ -12,7 +12,6 @@ import {
 import AddCampaignModal from "./AddCampaignModal";
 
 const inter = Inter({ subsets: ["latin"] });
-// const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
 // const api_startpoint = "http://localhost:5000";
 const api_startpoint = "http://152.42.239.141:5000";
 
@@ -27,6 +26,7 @@ interface Campaign {
   button_name?: string;
   image_url?: string;
   scheduled_for: string;
+  ended_at?: string | null;
   created_at: string;
   updated_at: string;
   status?: number;
@@ -37,9 +37,9 @@ interface Campaign {
 
 interface CampaignStats {
   total_submission: number;
-  total_approved: number;
-  total_rejected: number;
-  total_requested: number;
+  total_approved?: number;
+  total_rejected?: number;
+  total_requested?: number;
   total_coins_earned: number;
 }
 
@@ -62,6 +62,11 @@ export default function Campaigns() {
   });
   const [page, setPage] = useState<number>(1);
   const [total, setTotal] = useState<number>(0);
+  // Delete modal state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [campaignToDelete, setCampaignToDelete] = useState<Campaign | null>(
+    null
+  );
 
   const fetchCampaigns = async (page = 1) => {
     setLoading(true);
@@ -122,9 +127,16 @@ export default function Campaigns() {
     });
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Delete this campaign?")) return;
+    if (!campaignToDelete) return;
     await fetch(`${api_startpoint}/api/campaigns/${id}`, { method: "DELETE" });
     fetchCampaigns();
+    setShowDeleteModal(false);
+    setCampaignToDelete(null);
+  };
+
+  const confirmDelete = (campaign: Campaign) => {
+    setCampaignToDelete(campaign);
+    setShowDeleteModal(true);
   };
 
   return (
@@ -166,9 +178,10 @@ export default function Campaigns() {
                         "Status",
                         "Button",
                         "Scheduled",
+                        "End Date",
                         "Created",
                         "Updated",
-                        // "Details",
+                        "Details",
                         "Actions",
                       ].map((h) => (
                         <th key={h}>{h}</th>
@@ -197,10 +210,14 @@ export default function Campaigns() {
                         <td>{c.status == 1 ? "active" : "inactive"}</td>
                         <td>{c.button_name || "Start"}</td>
                         <td>{c.scheduled_for}</td>
+                        <td>
+                          {c.ended_at
+                            ? new Date(c.ended_at).toLocaleDateString()
+                            : "—"}
+                        </td>
                         <td>{c.created_at}</td>
                         <td>{c.updated_at}</td>
-
-                        {/* <td>
+                        <td>
                           <button
                             className="btn btn-sm btn-outline-primary"
                             onClick={() => openDetails(c)}
@@ -208,7 +225,6 @@ export default function Campaigns() {
                             View Stats
                           </button>
                         </td>
-                         */}
                         <td className="flex gap-2">
                           <IconEdit
                             className="cursor-pointer"
@@ -216,7 +232,7 @@ export default function Campaigns() {
                           />
                           <IconTrash
                             className="cursor-pointer text-red-600"
-                            onClick={() => handleDelete(c.id)}
+                            onClick={() => confirmDelete(c)}
                           />
                         </td>
                       </tr>
@@ -224,7 +240,6 @@ export default function Campaigns() {
                   </tbody>
                 </table>
 
-                {/* Pagination */}
                 <div className="flex items-center gap-2 mt-4">
                   <button
                     className="btn"
@@ -261,7 +276,6 @@ export default function Campaigns() {
             />
           )}
 
-          {/* Campaign Details Modal */}
           {detailsModal.open && (
             <div
               className="modal d-block"
@@ -295,21 +309,27 @@ export default function Campaigns() {
                     ) : detailsModal.stats ? (
                       <div className="space-y-3">
                         <div className="d-flex justify-content-between">
-                          <span className="fw-bold">Total Submissions:</span>
+                          <span className="fw-bold">Total Participants:</span>
                           <span>{detailsModal.stats.total_submission}</span>
                         </div>
-                        <div className="d-flex justify-content-between">
-                          <span className="fw-bold">Approved:</span>
-                          <span>{detailsModal.stats.total_approved}</span>
-                        </div>
-                        <div className="d-flex justify-content-between">
-                          <span className="fw-bold">Rejected:</span>
-                          <span>{detailsModal.stats.total_rejected}</span>
-                        </div>
-                        <div className="d-flex justify-content-between">
-                          <span className="fw-bold">Pending Review:</span>
-                          <span>{detailsModal.stats.total_requested}</span>
-                        </div>
+
+                        {detailsModal.campaign?.game_type !== 2 && (
+                          <>
+                            <div className="d-flex justify-content-between">
+                              <span className="fw-bold">Approved:</span>
+                              <span>{detailsModal.stats.total_approved}</span>
+                            </div>
+                            <div className="d-flex justify-content-between">
+                              <span className="fw-bold">Rejected:</span>
+                              <span>{detailsModal.stats.total_rejected}</span>
+                            </div>
+                            <div className="d-flex justify-content-between">
+                              <span className="fw-bold">Pending Review:</span>
+                              <span>{detailsModal.stats.total_requested}</span>
+                            </div>
+                          </>
+                        )}
+
                         <div className="d-flex justify-content-between border-top pt-2">
                           <span className="fw-bold">Total Coins Earned:</span>
                           <span className="text-success fw-bold">
@@ -332,6 +352,39 @@ export default function Campaigns() {
                       Close
                     </button>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Delete Confirmation Modal */}
+          {showDeleteModal && campaignToDelete && (
+            <div
+              className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50"
+              style={{ marginLeft: "250px" }}
+            >
+              <div className="bg-white rounded-xl shadow p-6 w-full max-w-md">
+                <h2 className="text-lg font-semibold mb-4">Confirm Deletion</h2>
+                <p>
+                  Are you sure you want to delete{" "}
+                  <strong>{campaignToDelete.campaign_title}</strong>?
+                </p>
+                <div className="flex justify-end gap-4 mt-6">
+                  <button
+                    onClick={() => {
+                      setShowDeleteModal(false);
+                      setCampaignToDelete(null);
+                    }}
+                    className="px-4 py-1 rounded border border-gray-400"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleDelete(campaignToDelete.id)}
+                    className="px-4 py-1 rounded bg-red-600 text-white"
+                  >
+                    Delete
+                  </button>
                 </div>
               </div>
             </div>
