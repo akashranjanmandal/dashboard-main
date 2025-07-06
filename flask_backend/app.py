@@ -1,4 +1,3 @@
-
 # app.py
 from binascii import Error
 import csv
@@ -22,11 +21,10 @@ logger = logging.getLogger(__name__)
 
 from pathlib import Path
 app = Flask(__name__)
-CORS(app)
+# CORS(app)
 
 # Configure CORS to allow requests from http://localhost:3000 with credentials
-#CORS(app, resources={r"/*": {"origins":"http://localhost:3000"}}, supports_credentials=True)
-
+CORS(app, resources={r"/*": {"origins":"*"}}, supports_credentials=True)
 
 import os
 from dotenv import load_dotenv
@@ -34,11 +32,9 @@ import uuid
 import boto3
 
 # Load environment variables from .env file
-# env_path = Path(__file__).resolve().parent / '.local.env'
-# load_dotenv(dotenv_path=env_path)
+env_path = Path(__file__).resolve().parent / '.local.env'
+load_dotenv(dotenv_path=env_path)
 
-env_path = Path('.') / '.env'
-load_dotenv()
 
 # DigitalOcean Spaces Config
 DO_SPACES_KEY = os.getenv('DO_SPACES_KEY')
@@ -9403,7 +9399,8 @@ def list_campaigns():
                 CASE 
                     WHEN c.game_type = 1 THEN 'Mission'
                     WHEN c.game_type = 2 THEN 'Quiz'
-                    ELSE 'Vision'
+                    WHEN c.game_type = 7 THEN 'Vision'
+                    ELSE 'Other'
                 END AS game_type_title,
                 c.reference_id,
                 COALESCE(
@@ -9509,48 +9506,70 @@ def create_campaign():
     finally:
         if conn:
             conn.close()
+
+            
 @app.route('/api/campaigns/<int:id>', methods=['PUT'])
 def update_campaign(id):
-    logger.info("✏ [PUT] Update campaign ID %s: %s", id, dict(request.form))
-    conn = None
+    # Handle different content types
+    if request.content_type.startswith('application/json'):
+        data = request.get_json()
+    else:
+        data = request.form
+
+    logger.info("✏ [PUT] Update campaign ID %s: %s", id, data)
 
     try:
-        form = request.form
-        game_type     = form.get('game_type')
-        reference_id  = form.get('reference_id')
-        title         = form.get('title') or form.get('campaign_title')
-        description   = form.get('description')
-        scheduled_for = form.get('scheduled_for')
-        button_name   = form.get('button_name')
-        status_val    = int(form.get('status', 1))  # Get status and convert to int
+        # Extract fields with proper defaults
+        game_type = int(data.get('game_type')) if 'game_type' in data else None
+        reference_id = int(data.get('reference_id')) if 'reference_id' in data else None
+        title = data.get('title') or data.get('campaign_title') or ''
+        description = data.get('description') or ''
+        scheduled_for = data.get('scheduled_for') or ''
+        button_name = data.get('button_name') or 'Start'
+        
+        # Proper status handling
+        try:
+            status_val = int(data.get('status', 1))
+        except:
+            status_val = 1
 
+        # Media handling
         media_id = None
         image_file = request.files.get('image')
         if image_file and image_file.filename:
-            logger.info(f"📷 Uploading updated image: {image_file.filename}")
             media = upload_media(image_file)
             media_id = media['id']
+        elif 'media_id' in data:
+            media_id = data.get('media_id')
 
-        # Build the SQL query
+        # Build SQL query
         sql = """
             UPDATE lifeapp.la_campaigns
-               SET game_type     = %s,
-                   reference_id  = %s,
-                   title         = %s,
-                   description   = %s,
-                   scheduled_for = %s,
-                   button_name   = %s,
-                   status        = %s,
+            SET game_type = %s,
+                reference_id = %s,
+                title = %s,
+                description = %s,
+                scheduled_for = %s,
+                button_name = %s,
+                status = %s,
         """
-        params = [game_type, reference_id, title, description, scheduled_for, button_name, status_val]
+        params = [
+            game_type, 
+            reference_id, 
+            title, 
+            description, 
+            scheduled_for, 
+            button_name, 
+            status_val
+        ]
 
-        # Handle media_id if present
+        # Handle media_id
         if media_id:
             sql += " media_id = %s,"
             params.append(media_id)
 
         # Handle ended_at based on status
-        if status_val == 0:  # Inactive
+        if status_val == 0:
             sql += " ended_at = NOW(), "
         else:
             sql += " ended_at = NULL, "
@@ -9558,12 +9577,11 @@ def update_campaign(id):
         sql += " updated_at = NOW() WHERE id = %s"
         params.append(id)
 
-        # Execute the query
+        # Execute update
         conn = get_db_connection()
         with conn.cursor() as cursor:
             cursor.execute(sql, tuple(params))
             conn.commit()
-            logger.info("✅ Campaign ID %s updated", id)
             return jsonify({'success': True}), 200
 
     except Exception as e:
@@ -9682,60 +9700,6 @@ def quiz_list():
     finally:
         conn.close()
 
-# ————— Campaign Details Endpoint —————
-
-@app.route('/api/campaigns/<int:id>/details', methods=['GET'])
-def campaign_details(id):
-    """Fetch statistics for a specific campaign"""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            # Fetch campaign by ID
-            cursor.execute("""
-                SELECT id, game_type, reference_id, scheduled_for, status, ended_at
-                FROM la_campaigns 
-                WHERE id = %s
-            """, (id,))
-            campaign = cursor.fetchone()
-            
-            if not campaign:
-                return jsonify({'error': 'Campaign not found'}), 404
-
-            game_type = campaign['game_type']
-            reference_id = campaign['reference_id']
-            start_date = campaign['scheduled_for']
-            
-            # Handle Vision campaigns (game_type=7)
-            if game_type == 7:
-                return handle_vision_details(conn, cursor, reference_id, start_date, campaign)
-            
-            # Handle Mission campaigns (game_type=1)
-            elif game_type == 1:
-                return handle_mission_details(conn, cursor, reference_id, start_date)
-            
-            # Return zeros for Quiz and other types
-            else:
-                return jsonify({
-                    'total_submission': 0,
-                    'total_approved': 0,
-                    'total_rejected': 0,
-                    'total_requested': 0,
-                    'total_coins_earned': 0
-                }), 200
-                
-    except Exception as e:
-        logger.error(f"Error fetching campaign details: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-    finally:
-        conn.close()
-
-
-# ... existing imports ...
-from datetime import datetime, timedelta, time
-from collections import defaultdict
-
-# ... existing code ...
-
 # ————— Campaign Details Functions —————
 def handle_vision_details(conn, cursor, vision_id, start_date, campaign):
     """Calculate statistics for Vision campaigns"""
@@ -9804,13 +9768,13 @@ def handle_vision_details(conn, cursor, vision_id, start_date, campaign):
     # Calculate total coins
     total_coins_earned = sum(user_coins.values())
 
-    return jsonify({
+    return {
         'total_submission': total_submission,
         'total_approved': total_approved,
         'total_rejected': total_rejected,
         'total_requested': total_requested,
         'total_coins_earned': total_coins_earned
-    }), 200
+    }
 
 def handle_mission_details(conn, cursor, mission_id, start_date):
     """Calculate statistics for Mission campaigns"""
@@ -9847,16 +9811,43 @@ def handle_mission_details(conn, cursor, mission_id, start_date):
         else:
             total_requested += 1
 
-    return jsonify({
+    return {
         'total_submission': total_submission,
         'total_approved': total_approved,
         'total_rejected': total_rejected,
         'total_requested': total_requested,
         'total_coins_earned': total_coins_earned
-    }), 200
+    }
+
+def handle_quiz_details(conn, cursor, topic_id, start_date, campaign):
+    """Calculate statistics for Quiz campaigns"""
+    # Determine time period
+    start_datetime = datetime.combine(start_date, time.min)
+    end_datetime = datetime.now()
+    
+    # Use ended_at if campaign is inactive
+    if campaign['status'] == 0 and campaign['ended_at']:
+        end_datetime = campaign['ended_at']
+
+    # Get distinct users and total coins
+    cursor.execute("""
+        SELECT 
+            COUNT(DISTINCT g.user_id) AS total_submission,
+            COALESCE(SUM(r.coins), 0) AS total_coins_earned
+        FROM la_quiz_games g
+        LEFT JOIN la_quiz_game_results r ON g.id = r.la_quiz_game_id
+        WHERE g.la_topic_id = %s
+          AND g.created_at BETWEEN %s AND %s
+    """, (topic_id, start_datetime, end_datetime))
+    result = cursor.fetchone()
+    
+    return {
+        'total_submission': result['total_submission'] or 0,
+        'total_coins_earned': result['total_coins_earned'] or 0
+    }
 
 @app.route('/api/campaigns/<int:id>/details', methods=['GET'])
-def get_campaign_details(id):  # Changed function name to get_campaign_details
+def get_campaign_details(id):
     """Fetch statistics for a specific campaign"""
     conn = get_db_connection()
     try:
@@ -9878,19 +9869,23 @@ def get_campaign_details(id):  # Changed function name to get_campaign_details
             
             # Handle Vision campaigns (game_type=7)
             if game_type == 7:
-                return handle_vision_details(conn, cursor, reference_id, start_date, campaign)
+                stats = handle_vision_details(conn, cursor, reference_id, start_date, campaign)
+                return jsonify(stats), 200
             
             # Handle Mission campaigns (game_type=1)
             elif game_type == 1:
-                return handle_mission_details(conn, cursor, reference_id, start_date)
+                stats = handle_mission_details(conn, cursor, reference_id, start_date)
+                return jsonify(stats), 200
             
-            # Return zeros for Quiz and other types
+            # Handle Quiz campaigns (game_type=2)
+            elif game_type == 2:
+                stats = handle_quiz_details(conn, cursor, reference_id, start_date, campaign)
+                return jsonify(stats), 200
+            
+            # Return zeros for other types
             else:
                 return jsonify({
                     'total_submission': 0,
-                    'total_approved': 0,
-                    'total_rejected': 0,
-                    'total_requested': 0,
                     'total_coins_earned': 0
                 }), 200
                 
@@ -9899,7 +9894,6 @@ def get_campaign_details(id):  # Changed function name to get_campaign_details
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
-
 
 if __name__ == '__main__':
     app.run(debug=True,  use_reloader=True)
