@@ -22,10 +22,11 @@ logger = logging.getLogger(__name__)
 
 from pathlib import Path
 app = Flask(__name__)
-# CORS(app)
+CORS(app)
 
 # Configure CORS to allow requests from http://localhost:3000 with credentials
 #CORS(app, resources={r"/*": {"origins":"http://localhost:3000"}}, supports_credentials=True)
+
 
 import os
 from dotenv import load_dotenv
