@@ -1,3 +1,4 @@
+
 # app.py
 from binascii import Error
 import csv
@@ -2064,15 +2065,13 @@ def vision_teacher_completions_summary():
 def get_state_list():
     connection = get_db_connection()
     try:
-        
         with connection.cursor() as cursor:
             sql = """
-                select distinct(state) from lifeapp.users where state != 'null' and state != '2';
+                SELECT DISTINCT(state) FROM lifeapp.users 
+                WHERE state != 'null' AND state != '2';
             """
             cursor.execute(sql)
             result = cursor.fetchall()
-            
-            # print("Query Result:", result)  # Debugging statement
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2094,7 +2093,7 @@ def get_city_list_teachers():
                 WHERE state = %s 
                   AND city IS NOT NULL AND city != ''
             """
-            cursor.execute(sql, (state))
+            cursor.execute(sql, (state,))
             result = cursor.fetchall()
             cities = [row['city'] for row in result]
         return jsonify(cities), 200
@@ -2108,13 +2107,9 @@ def get_school_list():
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            sql = """
-                select distinct(name) from lifeapp.schools;
-            """
+            sql = "SELECT DISTINCT(name) FROM lifeapp.schools;"
             cursor.execute(sql)
             result = cursor.fetchall()
-            
-            # print("Query Result:", result)  # Debugging statement
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2126,20 +2121,15 @@ def get_new_school_list():
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            sql = """
-                select distinct(name), id, code from lifeapp.schools;
-            """
+            sql = "SELECT DISTINCT(name), id, code FROM lifeapp.schools;"
             cursor.execute(sql)
             result = cursor.fetchall()
-            
-            # print("Query Result:", result)  # Debugging statement
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         connection.close()
 
-# New endpoint for filtering/searching the mission completes data
 @app.route('/api/student_dashboard_search', methods=['POST'])
 def search():
     filters = request.get_json() or {}
@@ -2148,16 +2138,17 @@ def search():
     city = filters.get('city')
     grade = filters.get('grade')
     mission_type = filters.get('mission_type')
-    mission_acceptance = filters.get('mission_acceptance')
+    mission_acceptance = filters.get('mission_acceptance') or []  # Now array
+    vision_acceptance = filters.get('vision_acceptance') or []    # Now array
     requested_count = filters.get('mission_requested_no')
     accepted_count = filters.get('mission_accepted_no')
-    earn_coins = filters.get('earn_coins')  # Add this line
-    from_date = filters.get('from_date')  # New filter: starting date
-    to_date = filters.get('to_date')      # New filter: ending date
+    earn_coins = filters.get('earn_coins')
+    from_date = filters.get('from_date')
+    to_date = filters.get('to_date')
     mobile_no = filters.get('mobile_no')
     schoolCodes = filters.get('schoolCode')
     
-    # Build the base query with the CTE, including mission count aggregations
+    # Build the base query with the CTE
     sql = """
     WITH user_mission_stats AS (
         SELECT 
@@ -2167,20 +2158,34 @@ def search():
         FROM lifeapp.la_mission_completes
         GROUP BY user_id
     ),
+    user_vision_stats AS (
+        SELECT 
+            user_id,
+            COUNT(*) AS total_visions_requested,
+            SUM(CASE WHEN approved_at IS NOT NULL THEN 1 ELSE 0 END) AS total_visions_approved,
+            SUM(CASE WHEN rejected_at IS NOT NULL THEN 1 ELSE 0 END) AS total_visions_rejected
+        FROM lifeapp.vision_question_answers
+        GROUP BY user_id
+    ),
     cte AS (
         SELECT 
             u.id, u.name, ls.name AS school_name, u.guardian_name, u.email, u.username, 
             u.mobile_no, u.dob, u.type AS user_type, u.grade, u.city, u.state, 
-            u.address, u.earn_coins, u.heart_coins, u.brain_coins, u.school_id, u.school_code, u.created_at as registered_at, 
-            ums.total_missions_requested, ums.total_missions_accepted
+            u.address, u.earn_coins, u.heart_coins, u.brain_coins, u.school_id, u.school_code, 
+            u.created_at as registered_at, 
+            ums.total_missions_requested, ums.total_missions_accepted,
+            COALESCE(uvs.total_visions_requested, 0) AS total_visions_requested,
+            COALESCE(uvs.total_visions_approved, 0) AS total_visions_approved,
+            COALESCE(uvs.total_visions_rejected, 0) AS total_visions_rejected
         FROM lifeapp.users u
         INNER JOIN lifeapp.schools ls ON ls.id = u.school_id
         LEFT JOIN user_mission_stats ums ON ums.user_id = u.id
+        LEFT JOIN user_vision_stats uvs ON uvs.user_id = u.id
         WHERE u.type = 3 
     """
     params = []
     
-    # Append additional filter conditions if provided.
+    # Filter conditions
     if state:
         sql += " AND u.state = %s"
         params.append(state)
@@ -2209,13 +2214,32 @@ def search():
             params.append(6)
         else:
             params.append(5)
-    if mission_acceptance:
-        if mission_acceptance == 'accepted':
-            sql += " AND ums.total_missions_accepted > 0 "
-        else :
-            sql += " AND ums.total_missions_accepted = 0 "
     
-    # Add filters for mission counts if provided
+    # Mission acceptance filter (array-based)
+    if mission_acceptance:
+        mission_conditions = []
+        if 'accepted' in mission_acceptance:
+            mission_conditions.append("ums.total_missions_accepted > 0")
+        if 'rejected' in mission_acceptance:
+            mission_conditions.append("ums.total_missions_accepted = 0")
+            
+        if mission_conditions:
+            sql += " AND (" + " OR ".join(mission_conditions) + ")"
+    
+    # Vision acceptance filter (array-based)
+    if vision_acceptance:
+        vision_conditions = []
+        if 'approved' in vision_acceptance:
+            vision_conditions.append("uvs.total_visions_approved > 0")
+        if 'rejected' in vision_acceptance:
+            vision_conditions.append("uvs.total_visions_rejected > 0")
+        if 'requested' in vision_acceptance:
+            vision_conditions.append("(uvs.total_visions_approved = 0 AND uvs.total_visions_rejected = 0 AND uvs.total_visions_requested > 0)")
+            
+        if vision_conditions:
+            sql += " AND (" + " OR ".join(vision_conditions) + ")"
+
+    # Mission count filters
     if requested_count:
         sql += " AND ums.total_missions_requested = %s"
         params.append(int(requested_count))
@@ -2234,31 +2258,14 @@ def search():
             sql += " AND u.earn_coins > 1000"
 
     if schoolCodes:
-        # 1. Make sure it’s a Python list
         codes = schoolCodes if isinstance(schoolCodes, list) else [schoolCodes]
-
-        # 2. Create “%s,%s,…,%s” with one %s per code
         placeholders = ",".join(["%s"] * len(codes))
-
-        # 3. Inject both IN‑lists into your SQL
-        sql += f"""
-        AND (
-            u.school_code IN ({placeholders})
-        
-        )
-        """
-        # OR u.school_id   IN ({placeholders})
-        # 4a. Bind for u.school_code → cast each code to int()
+        sql += f" AND u.school_code IN ({placeholders})"
         params.extend([int(c) for c in codes])
-
-        # 4b. Bind for u.school_id   → use the raw codes (or ints if your IDs are numeric)
-        # params.extend(codes)
-
         
     if mobile_no:
-        sql+= " AND u.mobile_no = %s"
+        sql += " AND u.mobile_no = %s"
         params.append(mobile_no)
-    # Add date range filters
     if from_date:
         sql += " AND u.created_at >= %s"
         params.append(from_date)
