@@ -215,6 +215,10 @@ function SearchableDropdown({
       ? value.filter((item) => item !== option)
       : [...value, option];
     onChange(newValues);
+    setIsOpen(false);
+    setSearchTerm("");
+    setDebouncedSearchTerm("");
+    setDisplayedItems(maxDisplayItems);
   };
 
   // The options to display - limited by displayedItems count
@@ -234,10 +238,10 @@ function SearchableDropdown({
         aria-expanded={isOpen}
         aria-haspopup="listbox"
       >
-        <span className={value.length > 0 ? "text-gray-900" : "text-gray-500"}>
+        <span className={value ? "text-gray-900" : "text-gray-500"}>
           {isLoading
             ? "Loading..."
-            : value.length > 0
+            : value.length
             ? `${value.length} selected`
             : placeholder}
         </span>
@@ -311,8 +315,7 @@ function SearchableDropdown({
 }
 
 // const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
-// const api_startpoint = "http://localhost:5000";
-const api_startpoint = "http://152.42.239.141:5000";
+const api_startpoint = "http://localhost:5000";
 
 // const api_startpoint = 'http://localhost:5000'
 
@@ -615,17 +618,12 @@ export default function StudentDashboard() {
 
   const [selectedGrade, setSelectedGrade] = useState("");
   const [selectedMissionType, setSelectedMissionType] = useState("");
-  const [selectedMissionAcceptance, setSelectedMissionAcceptance] = useState<
-    string[]
-  >([]);
-
+  const [selectedMissionAcceptance, setSelectedMissionAcceptance] =
+    useState("");
   const [selectedMissionRequestedNo, setSelectedMissionRequestedNo] =
     useState("");
   const [selectedMissionAcceptedNo, setSelectedMissionAcceptedNo] =
     useState("");
-  const [selectedVisionAcceptance, setSelectedVisionAcceptance] = useState<
-    string[]
-  >([]);
   const [selectedEarnCoins, setSelectedEarnCoins] = useState("");
   const [selectedFromDate, setSelectedFromDate] = useState(""); // New state for From Date
   const [selectedToDate, setSelectedToDate] = useState(""); // New state for To Date
@@ -644,19 +642,13 @@ export default function StudentDashboard() {
       school: selectedSchools.length > 0 ? selectedSchools : undefined,
       city: selectedCity,
       grade: selectedGrade,
-      mission_acceptance:
-        selectedMissionAcceptance.length > 0
-          ? selectedMissionAcceptance
-          : undefined,
-      vision_acceptance:
-        selectedVisionAcceptance.length > 0
-          ? selectedVisionAcceptance
-          : undefined,
-      mission_requested_no: selectedMissionRequestedNo,
-      mission_accepted_no: selectedMissionAcceptedNo,
-      earn_coins: selectedEarnCoins,
-      from_date: selectedFromDate,
-      to_date: selectedToDate,
+      mission_type: "",
+      mission_acceptance: selectedMissionAcceptance,
+      mission_requested_no: selectedMissionRequestedNo, // Add these filters
+      mission_accepted_no: selectedMissionAcceptedNo, // Add these filters
+      earn_coins: selectedEarnCoins, // Add this line
+      from_date: selectedFromDate, // Include the From Date filter
+      to_date: selectedToDate, // Include the To Date filter
       mobile_no: selectedMobileNo,
       schoolCode:
         selectedSchoolCode.length > 0 ? selectedSchoolCode : undefined,
@@ -695,10 +687,9 @@ export default function StudentDashboard() {
     setSelectedSchools([]);
     setSelectedGrade("");
     // setSelectedMissionType("");
-    setSelectedMissionAcceptance([]);
+    setSelectedMissionAcceptance("");
     setSelectedMissionAcceptedNo("");
     setSelectedMissionRequestedNo("");
-    setSelectedVisionAcceptance([]);
     setSelectedEarnCoins("");
     setSelectedFromDate(""); // Clear the From Date
     setSelectedToDate(""); // Clear the To Date
@@ -1399,7 +1390,7 @@ export default function StudentDashboard() {
         // Improved data transformation
         const groupedData: Record<string, MissionStatusData> = {};
 
-        data.forEach((entry: any) => {
+        data.data.forEach((entry: any) => {
           const period = entry.period;
           if (!groupedData[period]) {
             groupedData[period] = {
@@ -1628,12 +1619,12 @@ export default function StudentDashboard() {
   const seriesData = levelsToFetch.map((level) => ({
     name:
       level === "level1"
-        ? "Level 1: Grade\u00a01–5"
+        ? "Level 1: Grade 1–5"
         : level === "level2"
-        ? "Level 2: Grade\u00a06+"
+        ? "Level 2: Grade 6+"
         : level === "level3"
-        ? "Level 3: Grade\u00a07+"
-        : "Level 4: Grade\u00a08+",
+        ? "Level 3: Grade 7+"
+        : "Level 4: Grade 8+",
     type: "bar" as const,
     stack: "total" as const,
     data: EchartDataLevel.map((item) => item[`${level}_count`] || 0),
@@ -3791,10 +3782,7 @@ export default function StudentDashboard() {
             {showGradeModal && (
               <div
                 className="modal fade show"
-                style={{
-                  display: "block",
-                  backgroundColor: "rgba(0,0,0,0.5)",
-                }}
+                style={{ display: "block", backgroundColor: "rgba(0,0,0,0.5)" }}
               >
                 <div className="modal-dialog modal-lg">
                   <div className="modal-content">
@@ -3889,10 +3877,7 @@ export default function StudentDashboard() {
             {showDemographicsModal && (
               <div
                 className="modal fade show"
-                style={{
-                  display: "block",
-                  backgroundColor: "rgba(0,0,0,0.5)",
-                }}
+                style={{ display: "block", backgroundColor: "rgba(0,0,0,0.5)" }}
               >
                 <div className="modal-dialog modal-xl">
                   <div className="modal-content flex items-center">
@@ -3942,10 +3927,7 @@ export default function StudentDashboard() {
             {showChallengesModal && (
               <div
                 className="modal fade show"
-                style={{
-                  display: "block",
-                  backgroundColor: "rgba(0,0,0,0.5)",
-                }}
+                style={{ display: "block", backgroundColor: "rgba(0,0,0,0.5)" }}
               >
                 <div className="modal-dialog modal-lg">
                   <div className="modal-content">
@@ -4123,10 +4105,7 @@ export default function StudentDashboard() {
             {openQuizTopicLevelModal && (
               <div
                 className="modal fade show"
-                style={{
-                  display: "block",
-                  backgroundColor: "rgba(0,0,0,0.5)",
-                }}
+                style={{ display: "block", backgroundColor: "rgba(0,0,0,0.5)" }}
               >
                 <div className="modal-dialog modal-lg">
                   <div className="modal-content">
@@ -4339,18 +4318,10 @@ export default function StudentDashboard() {
                       className="border p-1 rounded"
                     >
                       <option value="all">All</option>
-                      <option value="level1">
-                        Level\u00a01 (Grade\u00a01–5)
-                      </option>
-                      <option value="level2">
-                        Level\u00a02 (Grade\u00a06+)
-                      </option>
-                      <option value="level3">
-                        Level\u00a03 (Grade\u00a07+)
-                      </option>
-                      <option value="level4">
-                        Level\u00a04 (Grade\u00a08+)
-                      </option>
+                      <option value="level1">Level 1 (Grade 1–5)</option>
+                      <option value="level2">Level 2 (Grade 6+)</option>
+                      <option value="level3">Level 3 (Grade 7+)</option>
+                      <option value="level4">Level 4 (Grade 8+)</option>
                     </select>
                   </div>
                   {/* Loading, error, or chart */}
@@ -5125,29 +5096,19 @@ export default function StudentDashboard() {
                                         </select>
                                     </div> */}
                   <div className="col-12 col-md-6 col-lg-3">
-                    <label className="form-label">Mission Status</label>
-                    <SearchableDropdown
-                      options={["accepted", "rejected"]}
-                      placeholder="Select Mission Status"
+                    <select
+                      className="form-select"
                       value={selectedMissionAcceptance}
-                      onChange={setSelectedMissionAcceptance}
-                      isLoading={false}
-                      maxDisplayItems={10}
-                    />
+                      onChange={(e) =>
+                        setSelectedMissionAcceptance(e.target.value)
+                      }
+                    >
+                      <option value="">All Missions</option>
+                      <option value="accepted">Missions Approved</option>
+                      <option value="rejected">Mission Rejected</option>
+                    </select>
                   </div>
                   <div className="col-12 col-md-6 col-lg-3">
-                    <label className="form-label">Vision Status</label>
-                    <SearchableDropdown
-                      options={["approved", "rejected", "requested"]}
-                      placeholder="Select Vision Status"
-                      value={selectedVisionAcceptance}
-                      onChange={setSelectedVisionAcceptance}
-                      isLoading={false}
-                      maxDisplayItems={10}
-                    />
-                  </div>
-                  <div className="col-12 col-md-6 col-lg-3">
-                    <label className="form-label">School Status</label>
                     <SearchableDropdown
                       options={schools}
                       placeholder="Select School"
@@ -5157,8 +5118,7 @@ export default function StudentDashboard() {
                       maxDisplayItems={200}
                     />
                   </div>
-                  <div className="col-12 col-md-6 col-lg-3 ">
-                    <label className="form-label">Grade Status</label>
+                  <div className="col-12 col-md-6 col-lg-3 text-gray-500">
                     <select
                       className="form-select"
                       value={selectedGrade}
@@ -5180,7 +5140,7 @@ export default function StudentDashboard() {
                       options={states}
                       placeholder="Select State"
                       value={selectedState ? [selectedState] : []} // Convert to array
-                      onChange={(vals) => setSelectedState(vals[0] || "")}
+                      onChange={(vals) => setSelectedState(vals[0] || "")} // Take first value
                       isLoading={isStatesLoading}
                       maxDisplayItems={200}
                     />
@@ -5192,7 +5152,7 @@ export default function StudentDashboard() {
                       options={cities}
                       placeholder="Select city"
                       value={selectedCity ? [selectedCity] : []} // Convert to array
-                      onChange={(vals) => setSelectedCity(vals[0] || "")}
+                      onChange={(vals) => setSelectedCity(vals[0] || "")} // Take first value
                       isLoading={isCitiesLoading}
                       maxDisplayItems={200}
                     />
@@ -5432,7 +5392,6 @@ export default function StudentDashboard() {
                     <table className="table table-striped">
                       <thead>
                         <tr>
-                          {/* In the table header */}
                           <th>ID</th>
                           <th>Name</th>
                           <th>School</th>
@@ -5452,11 +5411,8 @@ export default function StudentDashboard() {
                           <th>School ID</th>
                           <th>School Code</th>
                           <th>Registered At</th>
-                          <th>Missions Requested</th>
-                          <th>Missions Accepted</th>
-                          <th>Vision Requested</th>
-                          <th>Vision Approved</th>
-                          <th>Vision Rejected</th>
+                          <th>Total Requested</th>
+                          <th>Total Accepted</th>
                           <th>Actions</th>
                         </tr>
                       </thead>
@@ -5484,9 +5440,6 @@ export default function StudentDashboard() {
                             <td>{row.registered_at}</td>
                             <td>{row.total_missions_requested || 0}</td>
                             <td>{row.total_missions_accepted || 0}</td>
-                            <td>{row.total_visions_requested}</td>
-                            <td>{row.total_visions_approved}</td>
-                            <td>{row.total_visions_rejected}</td>
                             <td>
                               <button
                                 className="btn btn-sm btn-primary me-2 "
