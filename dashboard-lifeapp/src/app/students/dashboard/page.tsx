@@ -56,6 +56,7 @@ import dynamic from "next/dynamic";
 const HighchartsReact = dynamic(() => import("highcharts-react-official"), {
   ssr: false,
 });
+
 // import Highcharts from 'highcharts/highmaps';
 // const Highcharts = dynamic(() => import('highcharts/highmaps'), { ssr: false });
 
@@ -315,13 +316,17 @@ function SearchableDropdown({
 }
 
 // const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
-const api_startpoint = "http://localhost:5000";
-
-// const api_startpoint = 'http://localhost:5000'
+// const api_startpoint = "http://localhost:5000";
+const api_startpoint = "http://152.42.239.141:5000";
 
 export default function StudentDashboard() {
+  const [selectedVisionAcceptance, setSelectedVisionAcceptance] = useState("");
+  const [selectedVisionRequestedNo, setSelectedVisionRequestedNo] =
+    useState("");
+  const [selectedVisionAcceptedNo, setSelectedVisionAcceptedNo] = useState("");
   const [totalStudents, setTotalStudents] = useState<number>(0);
   const [selectedState, setSelectedState] = useState("");
+
   useEffect(() => {
     async function fetchStudentCount() {
       try {
@@ -334,6 +339,7 @@ export default function StudentDashboard() {
         console.error("Error fetching user count:", error);
       }
     }
+
     fetchStudentCount();
   }, []);
 
@@ -642,18 +648,19 @@ export default function StudentDashboard() {
       school: selectedSchools.length > 0 ? selectedSchools : undefined,
       city: selectedCity,
       grade: selectedGrade,
-      mission_type: "",
       mission_acceptance: selectedMissionAcceptance,
-      mission_requested_no: selectedMissionRequestedNo, // Add these filters
-      mission_accepted_no: selectedMissionAcceptedNo, // Add these filters
-      earn_coins: selectedEarnCoins, // Add this line
-      from_date: selectedFromDate, // Include the From Date filter
-      to_date: selectedToDate, // Include the To Date filter
+      mission_requested_no: selectedMissionRequestedNo,
+      mission_accepted_no: selectedMissionAcceptedNo,
+      vision_acceptance: selectedVisionAcceptance, // Add this
+      vision_requested_no: selectedVisionRequestedNo, // Add this
+      vision_accepted_no: selectedVisionAcceptedNo, // Add this
+      earn_coins: selectedEarnCoins,
+      from_date: selectedFromDate,
+      to_date: selectedToDate,
       mobile_no: selectedMobileNo,
       schoolCode:
         selectedSchoolCode.length > 0 ? selectedSchoolCode : undefined,
     };
-
     setIsTableLoading(true); // Set loading to true when search starts
 
     try {
@@ -693,7 +700,9 @@ export default function StudentDashboard() {
     setSelectedEarnCoins("");
     setSelectedFromDate(""); // Clear the From Date
     setSelectedToDate(""); // Clear the To Date
-    // Clear other filters...
+    setSelectedVisionAcceptance("");
+    setSelectedVisionRequestedNo("");
+    setSelectedVisionAcceptedNo("");
     setSelectedMobileNo("");
     setInputCode("");
     setSelectedSchoolCode([]);
@@ -5102,10 +5111,68 @@ export default function StudentDashboard() {
                       onChange={(e) =>
                         setSelectedMissionAcceptance(e.target.value)
                       }
+                      required
                     >
                       <option value="">All Missions</option>
                       <option value="accepted">Missions Approved</option>
                       <option value="rejected">Mission Rejected</option>
+                    </select>
+                  </div>
+                  {/* Vision Acceptance Filter */}
+                  <div className="col-12 col-md-6 col-lg-3">
+                    <select
+                      className="form-select"
+                      value={selectedVisionAcceptance}
+                      onChange={(e) =>
+                        setSelectedVisionAcceptance(e.target.value)
+                      }
+                    >
+                      <option value="">All Visions</option>
+                      <option value="accepted">Vision Approved</option>
+                      <option value="rejected">Vision Rejected</option>
+                    </select>
+                  </div>
+
+                  {/* Vision Requested Count */}
+                  <div className="col-12 col-md-6 col-lg-3">
+                    <select
+                      className="form-select"
+                      value={selectedVisionRequestedNo}
+                      onChange={(e) =>
+                        setSelectedVisionRequestedNo(e.target.value)
+                      }
+                    >
+                      <option value="">Select Vision Requested</option>
+                      {Array.from({ length: 20 }, (_, i) => i + 1).map(
+                        (requesteds) => (
+                          <option
+                            key={requesteds}
+                            value={requesteds.toString()}
+                          >
+                            Requests made - {requesteds}
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </div>
+
+                  {/* Vision Accepted Count */}
+                  <div className="col-12 col-md-6 col-lg-3">
+                    <select
+                      className="form-select"
+                      value={selectedVisionAcceptedNo}
+                      onChange={(e) =>
+                        setSelectedVisionAcceptedNo(e.target.value)
+                      }
+                    >
+                      <option value="">Select Vision Approved</option>
+                      {Array.from({ length: 20 }, (_, i) => i + 1).map(
+                        (approves) => (
+                          <option key={approves} value={approves.toString()}>
+                            Approves made - {approves}
+                          </option>
+                        )
+                      )}
                     </select>
                   </div>
                   <div className="col-12 col-md-6 col-lg-3">
@@ -5411,8 +5478,10 @@ export default function StudentDashboard() {
                           <th>School ID</th>
                           <th>School Code</th>
                           <th>Registered At</th>
-                          <th>Total Requested</th>
-                          <th>Total Accepted</th>
+                          <th>Mission Requested</th>
+                          <th>Mission Approved</th>
+                          <th>Vision Requested</th>
+                          <th>Vision Approved</th>
                           <th>Actions</th>
                         </tr>
                       </thead>
@@ -5440,6 +5509,8 @@ export default function StudentDashboard() {
                             <td>{row.registered_at}</td>
                             <td>{row.total_missions_requested || 0}</td>
                             <td>{row.total_missions_accepted || 0}</td>
+                            <td>{row.total_visions_requested || 0}</td>
+                            <td>{row.total_visions_accepted || 0}</td>
                             <td>
                               <button
                                 className="btn btn-sm btn-primary me-2 "
