@@ -3,530 +3,1064 @@ import React, { useEffect, useState, ChangeEvent, FormEvent } from "react";
 import { Inter } from "next/font/google";
 import "@tabler/core/dist/css/tabler.min.css";
 import { Sidebar } from "@/components/ui/sidebar";
-import { Download, Search, XCircle } from "lucide-react";
-import { IconCircleCheck, IconCircleX } from "@tabler/icons-react"; // Added icons for modal
+import NumberFlow from "@number-flow/react";
+import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
+import Papa from "papaparse";
 
 const inter = Inter({ subsets: ["latin"] });
-// const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
-// const api_startpoint = 'http://localhost:5000'
+// const api_startpoint = "http://localhost:5000";
 const api_startpoint = "http://152.42.239.141:5000";
 
-interface SessionRow {
-  [key: string]: any;
-  answer_id: number;
-  vision_title: string;
-  question_title: string;
-  user_name: string;
-  teacher_name: string;
-  answer_text: string;
-  answer_option: string;
-  media_id: number | null;
-  media_path: string | null;
-  score: number | null;
-  answer_type: string;
-  created_at: string;
-  media_url?: string;
+interface ModalProps {
+  mode: "add" | "edit";
+  initial?: VisionRow;
+  onClose: () => void;
+  onSuccess: () => void;
 }
 
-export default function VisionSessionsPage() {
-  const [rows, setRows] = useState<SessionRow[]>([]);
-  const [page, setPage] = useState(1);
-  const [perPage] = useState(25);
-  const [qtype, setQtype] = useState("");
-  const [assignedBy, setAssignedBy] = useState("");
-  const [dateStart, setDateStart] = useState("");
-  const [dateEnd, setDateEnd] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-  const [inputCode, setInputCode] = useState("");
-  const [filterStatus, setFilterStatus] = useState(""); // '', 'requested','approved','rejected'
-  // Update existing state declaration
-  const [selectedSchoolCode, setSelectedSchoolCode] = useState<string[]>([]);
+interface QuestionPayload {
+  question_id?: number;
+  question_type: "mcq" | "reflection" | "image";
+  question: string;
+  options?: { a: string; b: string; c: string; d: string };
+  correct_answer?: string;
+}
 
-  // NEW: State for confirmation modal
-  const [confirmationModal, setConfirmationModal] = useState({
-    show: false,
-    type: "", // "approve" or "reject"
-    message: "",
-  });
+function AddEditModal({ mode, initial, onClose, onSuccess }: ModalProps) {
+  const isEdit = mode === "edit";
 
-  const fetchSessions = async () => {
-    setLoading(true);
-    const params = new URLSearchParams();
-    params.set("page", page.toString());
-    params.set("per_page", perPage.toString());
-    if (qtype) params.set("question_type", qtype);
-    if (assignedBy) params.set("assigned_by", assignedBy);
-    if (dateStart) params.set("date_start", dateStart);
-    if (dateEnd) params.set("date_end", dateEnd);
-    if (filterStatus) params.set("status", filterStatus);
+  const [title, setTitle] = useState(initial?.title || "");
+  const [desc, setDesc] = useState(initial?.description || "");
+  const [you, setYou] = useState(initial?.youtube_url || "");
+  const [forAll, setForAll] = useState(
+    initial ? initial.allow_for.toString() : "1"
+  );
+  const [subj, setSubj] = useState(initial?.subject_id?.toString() || "");
+  const [lvl, setLvl] = useState(initial?.level_id?.toString() || "");
+  const [stat, setStat] = useState(initial?.status.toString() || "1");
+  const [mcqInputMode, setMcqInputMode] = useState<"manual" | "csv">("manual");
+  const [subjTitle, setSubjTitle] = useState(
+    initial?.subject?.toString() || ""
+  );
+  const [lvlTitle, setLvlTitle] = useState(initial?.level?.toString() || "");
+  const [questionType, setQuestionType] = useState<
+    "mcq" | "reflection" | "image"
+  >(initial?.questions?.[0]?.question_type || "mcq");
 
-    // append each code separately
-    selectedSchoolCode.forEach((code) => params.append("school_codes", code));
+  const [mcqQ, setMcqQ] = useState("");
+  const [mcqOpts, setMcqOpts] = useState({ a: "", b: "", c: "", d: "" });
+  const [mcqAns, setMcqAns] = useState("");
+  const [refQ, setRefQ] = useState("");
+  const [imgQ, setImgQ] = useState("");
 
-    const res = await fetch(`${api_startpoint}/api/vision_sessions?${params}`);
-    const result = await res.json();
-    // Ensure data is an array
-    const sessions = Array.isArray(result.data) ? result.data : [];
-    setRows(sessions);
-    setLoading(false);
+  const initialMcq = isEdit
+    ? initial?.questions
+        .filter((q: QuestionPayload) => q.question_type === "mcq")
+        .map((q: QuestionPayload) => ({
+          question: q.question,
+          options: q.options ?? { a: "", b: "", c: "", d: "" },
+          correct_answer: q.correct_answer ?? "",
+        }))
+    : [
+        {
+          question: "",
+          options: { a: "", b: "", c: "", d: "" },
+          correct_answer: "",
+        },
+      ];
+  const [mcqList, setMcqList] = useState(
+    initialMcq || [
+      {
+        question: "",
+        options: { a: "", b: "", c: "", d: "" },
+        correct_answer: "",
+      },
+    ]
+  );
+
+  const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    Papa.parse(file, {
+      complete: (result) => {
+        const parsed = result.data as string[][];
+        const cleaned = parsed
+          .filter((row) => row.length >= 6)
+          .map((row) => ({
+            question: row[0]?.trim(),
+            options: {
+              a: row[1]?.trim(),
+              b: row[2]?.trim(),
+              c: row[3]?.trim(),
+              d: row[4]?.trim(),
+            },
+            correct_answer: row[5]?.trim().toLowerCase(),
+          }));
+        setMcqList(cleaned);
+      },
+      skipEmptyLines: true,
+    });
   };
+  const [index, setIndex] = useState<number>(initial?.index || 1);
+  const initialSingle = isEdit
+    ? initial?.questions.find((q) => q.question_type !== "mcq")?.question ?? ""
+    : "";
+  const [singleQ, setSingleQ] = useState(initialSingle);
 
-  // Trigger fetch on filters change
-  useEffect(() => {
-    fetchSessions();
-  }, [
-    filterStatus,
-    page,
-    qtype,
-    assignedBy,
-    dateStart,
-    dateEnd,
-    selectedSchoolCode,
-  ]);
-
-  // Called when "Search" button clicked
-  const handleSearch = () => {
-    setPage(1);
-    fetchSessions();
-  };
-
-  // Reset all filters
-  const handleClear = () => {
-    setQtype("");
-    setAssignedBy("");
-    setDateStart("");
-    setDateEnd("");
-    setSelectedSchoolCode([]);
-    setInputCode("");
-    setPage(1);
-    fetchSessions();
-  };
-
-  const handleScoreBlur = async (id: number, value: string) => {
-    const newScore = Number(value);
-    if (!isNaN(newScore)) {
-      await fetch(`${api_startpoint}/api/vision_sessions/${id}/score`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ score: newScore }),
-      });
-      fetchSessions();
+  const addMcq = () => {
+    if (mcqList.length < 5) {
+      setMcqList([
+        ...mcqList,
+        {
+          question: "",
+          options: { a: "", b: "", c: "", d: "" },
+          correct_answer: "",
+        },
+      ]);
     }
   };
+  const removeMcq = (idx: number) => {
+    setMcqList(mcqList.filter((_, i) => i !== idx));
+  };
 
-  const exportToCSV = () => {
-    // Return early if there's no data to export
-    if (rows.length === 0) {
-      alert("No data to export. Please perform a search first.");
+  const [subjects, setSubjects] = useState<any[]>([]);
+  const [levels, setLevels] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetch(`${api_startpoint}/api/subjects_list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "1" }),
+    })
+      .then((r) => r.json())
+      .then((fetchedSubjects) => {
+        setSubjects(fetchedSubjects);
+
+        if (isEdit && initial) {
+          const foundSubject = fetchedSubjects.find(
+            (s: { title: string }) => JSON.parse(s.title).en === initial.subject
+          );
+          if (foundSubject) {
+            setSubj(foundSubject.id.toString());
+            setSubjTitle(JSON.parse(foundSubject.title).en);
+          }
+        }
+      });
+
+    fetch(`${api_startpoint}/api/levels`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page: 1 }),
+    })
+      .then((r) => r.json())
+      .then((fetchedLevels) => {
+        setLevels(fetchedLevels);
+
+        if (isEdit && initial) {
+          const foundLevel = fetchedLevels.find(
+            (l: { title: string }) => JSON.parse(l.title).en === initial.level
+          );
+          if (foundLevel) {
+            setLvl(foundLevel.id.toString());
+            setLvlTitle(JSON.parse(foundLevel.title).en);
+          }
+        }
+      });
+
+    if (isEdit && initial) {
+      initial.questions.forEach((q) => {
+        if (q.question_type === "mcq") {
+          setMcqQ(q.question);
+          setMcqOpts(q.options || { a: "", b: "", c: "", d: "" });
+          setMcqAns(q.correct_answer || "");
+        } else if (q.question_type === "reflection") {
+          setRefQ(q.question);
+        } else if (q.question_type === "image") {
+          setImgQ(q.question);
+        }
+      });
+    }
+  }, [isEdit, initial]);
+
+  const handleSave = async () => {
+    setLoading(true);
+
+    const questions: QuestionPayload[] = [];
+    if (questionType === "mcq") {
+      mcqList.forEach(
+        (q: { question: any; options: any; correct_answer: any }) => {
+          if (q.question) {
+            questions.push({
+              question_type: "mcq",
+              question: q.question,
+              options: q.options,
+              correct_answer: q.correct_answer,
+            });
+          }
+        }
+      );
+    } else {
+      questions.push({ question_type: questionType, question: singleQ });
+    }
+
+    if (!subj || !lvl || !title || !desc) {
+      alert("Please fill in all required fields.");
+      setLoading(false);
       return;
     }
 
+    const payload = {
+      title,
+      description: desc,
+      youtube_url: you,
+      allow_for: forAll,
+      subject_id: subj,
+      level_id: lvl,
+      status: stat,
+      index: Number(index) || 1,
+      questions,
+    };
+
+    const url = isEdit
+      ? `${api_startpoint}/api/visions/${initial!.vision_id}`
+      : `${api_startpoint}/api/visions`;
+    const method = isEdit ? "PUT" : "POST";
+
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.ok) {
+      onSuccess();
+      onClose();
+    } else {
+      alert("Save failed");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white p-6 rounded-lg w-full max-w-lg max-h-[90vh] overflow-auto">
+        <h2 className="text-xl font-semibold mb-4">
+          {isEdit ? "Edit" : "Add"} Vision
+        </h2>
+
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Title"
+          className="w-full border p-2 rounded mb-2"
+        />
+        <textarea
+          value={desc}
+          onChange={(e) => setDesc(e.target.value)}
+          placeholder="Description"
+          className="w-full border p-2 rounded mb-2"
+        />
+        <input
+          value={you}
+          onChange={(e) => setYou(e.target.value)}
+          placeholder="YouTube URL"
+          className="w-full border p-2 rounded mb-2"
+        />
+
+        <select
+          value={forAll}
+          onChange={(e) => setForAll(e.target.value)}
+          className="w-full border p-2 rounded mb-2"
+        >
+          <option value="1">All</option>
+          <option value="2">Teacher</option>
+          <option value="3">Student</option>
+        </select>
+
+        <select
+          value={subj}
+          onChange={(e) => {
+            setSubj(e.target.value);
+            const selectedSubject = subjects.find(
+              (s) => s.id.toString() === e.target.value
+            );
+            if (selectedSubject) {
+              setSubjTitle(JSON.parse(selectedSubject.title).en);
+            }
+          }}
+          className="w-full border p-2 rounded mb-2"
+        >
+          <option value="">Select Subject</option>
+          {subjects.map((s) => (
+            <option key={s.id} value={s.id}>
+              {JSON.parse(s.title).en}
+            </option>
+          ))}
+        </select>
+        <select
+          value={lvl}
+          onChange={(e) => {
+            setLvl(e.target.value);
+            const selectedLevel = levels.find(
+              (l) => l.id.toString() === e.target.value
+            );
+            if (selectedLevel) {
+              setLvlTitle(JSON.parse(selectedLevel.title).en);
+            }
+          }}
+          className="w-full border p-2 rounded mb-2"
+        >
+          <option value="">Select Level</option>
+          {levels.map((l) => (
+            <option key={l.id} value={l.id}>
+              {JSON.parse(l.title).en}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={stat}
+          onChange={(e) => setStat(e.target.value)}
+          className="w-full border p-2 rounded mb-4"
+        >
+          <option value="1">Active</option>
+          <option value="0">Inactive</option>
+        </select>
+        <label className="block mb-2">Index Position</label>
+        <input
+          type="number"
+          min="1"
+          value={index}
+          onChange={(e) => setIndex(Number(e.target.value))}
+          className="w-full border p-2 rounded"
+          placeholder="Enter index position"
+        />
+        <select
+          value={questionType}
+          onChange={(e) => setQuestionType(e.target.value as any)}
+          className="w-full border p-2 rounded mb-4"
+        >
+          <option value="mcq">MCQ</option>
+          <option value="reflection">Reflection</option>
+          <option value="image">Image</option>
+        </select>
+
+        {questionType === "mcq" && (
+          <div className="border p-3 rounded mb-4">
+            <select
+              value={mcqInputMode}
+              onChange={(e) =>
+                setMcqInputMode(e.target.value as "manual" | "csv")
+              }
+              className="w-full border p-2 rounded mb-4"
+            >
+              <option value="manual">Upload Manually</option>
+              <option value="csv">Upload via CSV</option>
+            </select>
+
+            {mcqInputMode === "manual" && (
+              <>
+                {mcqList.map((q, idx) => (
+                  <div key={idx} className="mcq-entry">
+                    <textarea
+                      value={q.question}
+                      onChange={(e) => {
+                        const updated = [...mcqList];
+                        updated[idx].question = e.target.value;
+                        setMcqList(updated);
+                      }}
+                      placeholder={`Question ${idx + 1}`}
+                      className="w-full border p-2 rounded mb-2"
+                    />
+                    {(["a", "b", "c", "d"] as const).map((opt) => (
+                      <input
+                        key={opt}
+                        placeholder={`Option ${opt}`}
+                        value={q.options[opt]}
+                        onChange={(e) => {
+                          const updated = [...mcqList];
+                          updated[idx].options[opt] = e.target.value;
+                          setMcqList(updated);
+                        }}
+                        className="w-full border p-2 rounded mb-1"
+                      />
+                    ))}
+                    <select
+                      value={q.correct_answer}
+                      onChange={(e) => {
+                        const updated = [...mcqList];
+                        updated[idx].correct_answer = e.target.value;
+                        setMcqList(updated);
+                      }}
+                      className="w-full border p-2 rounded"
+                    >
+                      <option value="">Select Correct</option>
+                      {["a", "b", "c", "d"].map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt.toUpperCase()}
+                        </option>
+                      ))}
+                    </select>
+                    {mcqList.length > 1 && (
+                      <button onClick={() => removeMcq(idx)}>
+                        <IconTrash />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {mcqList.length < 5 && (
+                  <button onClick={addMcq} className="add-btn">
+                    <IconPlus /> Add another question
+                  </button>
+                )}
+              </>
+            )}
+
+            {mcqInputMode === "csv" && (
+              <div className="border p-3 rounded bg-gray-50">
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleCsvUpload}
+                  className="mb-2"
+                />
+
+                <div>
+                  <a
+                    href="/MCQtemplate.csv"
+                    download="MCQtemplate.csv"
+                    className="btn btn-outline-secondary"
+                  >
+                    Download CSV Template
+                  </a>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {questionType === "reflection" && (
+          <textarea
+            value={singleQ}
+            onChange={(e) => setSingleQ(e.target.value)}
+            placeholder="Reflection question"
+            className="w-full border p-2 mb-2 rounded"
+          />
+        )}
+
+        {questionType === "image" && (
+          <input
+            type="text"
+            value={singleQ}
+            onChange={(e) => setSingleQ(e.target.value)}
+            placeholder="Image question URL or prompt"
+            className="w-full border p-2 mb-2 rounded"
+          />
+        )}
+
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 border rounded">
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={loading}
+            className="px-4 py-2 bg-sky-700 text-white rounded flex items-center"
+          >
+            {loading && (
+              <span className="animate-spin rounded-full w-3 h-3 border-white border-t-2 mr-2" />
+            )}
+            {loading ? "Saving.." : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface VisionRow {
+  vision_id: number;
+  title: string;
+  description: string;
+  youtube_url: string | null;
+  allow_for: 1 | 2 | 3;
+  subject_id: number;
+  subject: string;
+  level: string;
+  level_id: number;
+  status: number;
+  index?: number;
+  questions: QuestionPayload[];
+}
+
+export default function VisionsPage() {
+  const [rows, setRows] = useState<VisionRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [fStatus, setFStatus] = useState<string>("");
+  const [fSubject, setFSubject] = useState<string>("");
+  const [fLevel, setFLevel] = useState<string>("");
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  const [showAdd, setShowAdd] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editRow, setEditRow] = useState<VisionRow | null>(null);
+  const [subjects, setSubjects] = useState<any[]>([]);
+  const [levels, setLevels] = useState<any[]>([]);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [visionToDelete, setVisionToDelete] = useState<VisionRow | null>(null);
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const perPage = 30;
+
+  async function fetchVisions() {
+    setLoading(true);
+    const params = new URLSearchParams({
+      page: currentPage.toString(),
+      per_page: perPage.toString(),
+    });
+
+    if (fStatus) params.set("status", fStatus);
+    if (fSubject) params.set("subject_id", fSubject);
+    if (fLevel) params.set("level_id", fLevel);
+
     try {
-      // Get all the headers (keys) from the first data row
-      const headers = Object.keys(rows[0]);
+      const url = `${api_startpoint}/api/visions?${params}`;
+      console.log("Fetch URL:", url);
 
-      // Create CSV header row
-      let csvContent = headers.join(",") + "\n";
+      const res = await fetch(url);
+      console.log("Response status:", res.status);
 
-      // Add data rows
-      rows.forEach((row) => {
-        const values = headers.map((header) => {
-          const cellValue =
-            row[header] === null || row[header] === undefined
-              ? ""
-              : row[header];
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error("Error response:", errorText);
+        throw new Error(`API responded with ${res.status}: ${errorText}`);
+      }
 
-          // Handle values that contain commas, quotes, or newlines
-          const escapedValue = String(cellValue).replace(/"/g, '""');
+      const data = await res.json();
+      console.log("API response data:", data);
 
-          // Wrap in quotes to handle special characters
-          return `"${escapedValue}"`;
-        });
+      // Determine if we're using the paginated endpoint
+      const isPaginatedEndpoint =
+        api_startpoint.includes("localhost") ||
+        (data.hasOwnProperty("visions") && data.hasOwnProperty("total"));
 
-        csvContent += values.join(",") + "\n";
+      let visions, total;
+
+      if (isPaginatedEndpoint) {
+        // Localhost-style response: { visions: [...], total: X }
+        visions = data.visions || [];
+        total = data.total || 0;
+      } else {
+        // Global endpoint: plain array
+        visions = Array.isArray(data) ? data : [];
+        total = visions.length;
+
+        // Implement client-side pagination
+        const startIndex = (currentPage - 1) * perPage;
+        const endIndex = startIndex + perPage;
+        visions = visions.slice(startIndex, endIndex);
+      }
+
+      setRows(visions);
+      setTotalCount(total);
+      setTotalPages(Math.ceil(total / perPage));
+    } catch (error: any) {
+      console.error("Fetch error:", error);
+      alert(`Failed to load visions: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+  const handleDelete = async () => {
+    if (!visionToDelete) return;
+    try {
+      await fetch(`${api_startpoint}/api/visions/${visionToDelete.vision_id}`, {
+        method: "DELETE",
       });
-
-      // Create a blob and download link
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-
-      // Create a temporary link element and trigger the download
-      const link = document.createElement("a");
-      link.setAttribute("href", url);
-      link.setAttribute(
-        "download",
-        `vision_sessions_data_export_${new Date()
-          .toISOString()
-          .slice(0, 10)}.csv`
-      );
-      link.style.visibility = "hidden";
-
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      fetchVisions();
+      setShowDeleteModal(false);
+      setVisionToDelete(null);
     } catch (error) {
-      console.error("Error exporting CSV:", error);
-      alert("An error occurred while exporting data. Please try again.");
+      console.error("Delete failed:", error);
+      alert("Failed to delete vision");
     }
   };
+
+  // Handle filter changes and reset pagination
+  const handleFilterChange = (filter: string, value: string) => {
+    if (filter === "status") setFStatus(value);
+    if (filter === "subject") setFSubject(value);
+    if (filter === "level") setFLevel(value);
+    setCurrentPage(1); // Reset to first page
+  };
+
+  useEffect(() => {
+    fetchVisions();
+  }, [fStatus, fSubject, fLevel, currentPage]);
+
+  useEffect(() => {
+    // Fetch subjects and levels
+    fetch(`${api_startpoint}/api/subjects_list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "1" }),
+    })
+      .then((res) => res.json())
+      .then(setSubjects);
+
+    fetch(`${api_startpoint}/api/levels`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page: 1 }),
+    })
+      .then((res) => res.json())
+      .then(setLevels);
+  }, []);
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= totalPages) {
+      setCurrentPage(newPage);
+    }
+  };
+
+  // Generate visible page numbers with ellipsis
+  const getPageNumbers = () => {
+    const pages = [];
+    const maxVisible = 5;
+
+    if (totalPages <= maxVisible) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+      let endPage = startPage + maxVisible - 1;
+
+      if (endPage > totalPages) {
+        endPage = totalPages;
+        startPage = Math.max(1, endPage - maxVisible + 1);
+      }
+
+      if (startPage > 1) {
+        pages.push(1);
+        if (startPage > 2) pages.push("...");
+      }
+
+      for (let i = startPage; i <= endPage; i++) {
+        pages.push(i);
+      }
+
+      if (endPage < totalPages) {
+        if (endPage < totalPages - 1) pages.push("...");
+        pages.push(totalPages);
+      }
+    }
+
+    return pages;
+  };
+
   return (
     <div className={`page bg-body ${inter.className} font-sans`}>
       <Sidebar />
-      <div className="page-wrapper" style={{ marginLeft: "250px" }}>
+      <div
+        className="page-wrapper"
+        style={{
+          marginLeft: "250px",
+          width: "calc(100% - 250px)",
+          padding: "1rem",
+        }}
+      >
         <div className="page-body">
-          <div className="container-xl pt-4 pb-4 space-y-2">
-            <div className="card shadow-sm border-0 mb-2">
-              <div className="card-body">
-                <div className="row g-3">
-                  <div className="col-12 col-md-6 col-lg-3">
-                    <select
-                      value={qtype}
-                      onChange={(e) => setQtype(e.target.value)}
-                      className="border p-2 rounded"
-                    >
-                      <option value="">All Types</option>
-                      <option value="option">MCQ</option>
-                      <option value="text">Reflection</option>
-                      <option value="image">Image</option>
-                    </select>
-                  </div>
-                  <div className="col-12 col-md-6 col-lg-3">
-                    <select
-                      value={assignedBy}
-                      onChange={(e) => setAssignedBy(e.target.value)}
-                      className="border p-2 rounded"
-                    >
-                      <option value="">All</option>
-                      <option value="teacher">Assigned by Teacher</option>
-                      <option value="self">Self-assigned</option>
-                    </select>
-                  </div>
-                  <div className="col-12 col-md-6 col-lg-3">
-                    <select
-                      value={filterStatus}
-                      onChange={(e) => setFilterStatus(e.target.value)}
-                      className="border p-2 rounded"
-                    >
-                      <option value="">All Status</option>
-                      <option value="requested">Requested</option>
-                      <option value="approved">Approved</option>
-                      <option value="rejected">Rejected</option>
-                    </select>
-                  </div>
-                  <div className="col-12 col-md-6 col-lg-3">
-                    <input
-                      type="date"
-                      value={dateStart}
-                      onChange={(e) => setDateStart(e.target.value)}
-                      className="border p-2 rounded"
-                    />
-                  </div>
-                  <div className="col-12 col-md-6 col-lg-3">
-                    <input
-                      type="date"
-                      value={dateEnd}
-                      onChange={(e) => setDateEnd(e.target.value)}
-                      className="border p-2 rounded"
-                    />
-                  </div>
-                  <div className="col-12 col-md-6 col-lg-4">
-                    <div className="border rounded p-2 bg-white">
-                      <input
-                        type="text"
-                        placeholder="Search With School code (comma separated)"
-                        className="form-control border-0 p-0"
-                        value={inputCode}
-                        onChange={(e) => setInputCode(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (["Enter", ",", " "].includes(e.key)) {
-                            e.preventDefault();
-                            const code = inputCode.trim();
-                            if (code && !selectedSchoolCode.includes(code)) {
-                              setSelectedSchoolCode((prev) => [...prev, code]);
-                            }
-                            setInputCode("");
-                          }
-                        }}
-                      />
-                      <div className="d-flex flex-wrap gap-2 mt-2">
-                        {selectedSchoolCode.map((code) => (
-                          <span
-                            key={code}
-                            className="badge bg-purple text-white d-flex align-items-center"
-                          >
-                            {code}
-                            <button
-                              type="button"
-                              className="btn-close btn-close-white ms-2"
-                              onClick={() =>
-                                setSelectedSchoolCode((prev) =>
-                                  prev.filter((c) => c !== code)
-                                )
-                              }
-                              aria-label="Remove"
-                            ></button>
-                          </span>
-                        ))}
+          <div className="container-xl pt-4 pb-4 space-y-4">
+            <div className="flex flex-wrap justify-between items-center gap-4">
+              <div className="card w-40">
+                <div className="card-body p-3">
+                  <div className="d-flex align-items-center">
+                    <div>
+                      <div className="subheader">Total Visions</div>
+                      <div className="h1 mb-0">
+                        <NumberFlow
+                          value={totalCount}
+                          className="fw-semi-bold text-dark"
+                          transformTiming={{
+                            endDelay: 6,
+                            duration: 750,
+                            easing: "cubic-bezier(0.42, 0, 0.58, 1)",
+                          }}
+                        />
                       </div>
                     </div>
                   </div>
                 </div>
-                {/* Action Buttons */}
-                <div className="d-flex flex-wrap gap-2 mt-4">
-                  <button
-                    className="btn btn-success d-inline-flex align-items-center"
-                    onClick={handleSearch}
-                  >
-                    <Search className="me-2" size={16} />
-                    Search
-                  </button>
-
-                  <button
-                    className="btn btn-warning d-inline-flex align-items-center text-dark"
-                    onClick={handleClear}
-                  >
-                    <XCircle className="me-2" size={16} />
-                    Clear
-                  </button>
-                </div>
               </div>
             </div>
-            {/* Action Buttons */}
-            <div className="d-flex flex-wrap gap-2">
-              <button
-                className="btn btn-purple d-inline-flex align-items-center text-white"
-                style={{ backgroundColor: "#6f42c1" }}
-                onClick={exportToCSV}
-              >
-                <Download className="me-2" size={16} />
-                Export
-              </button>
-            </div>
-            {/* Table */}
-            {loading ? (
-              <div className="w-8 h-8 border-t-2 border-sky-700 animate-spin rounded-full"></div>
-            ) : (
-              <table className="w-full table-auto border">
-                <thead>
-                  <tr className="bg-gray-100">
-                    <th className="p-2 border">Vision</th>
-                    <th className="p-2 border">Question</th>
-                    <th className="p-2 border">User</th>
-                    <th className="p-2 border">Assigned By</th>
-                    <th className="p-2 border">Answer Text</th>
-                    <th className="p-2 border">Answer Option</th>
-                    <th className="p-2 border">Image Answer</th>
-                    <th className="p-2 border">Total Points</th>
-                    <th className="p-2 border">Status</th>
-                    {filterStatus === "requested" && (
-                      <th className="p-2 border">Actions</th>
-                    )}
-                    <th className="p-2 border">Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.answer_id}>
-                      <td className="p-2 border">{r.vision_title}</td>
-                      <td className="p-2 border">{r.question_title}</td>
-                      <td className="p-2 border">{r.user_name}</td>
-                      <td className="p-2 border">{r.teacher_name}</td>
-                      <td className="p-2 border">
-                        {r.answer_type === "text" ? r.answer_text : ""}
-                      </td>
-                      <td className="p-2 border">
-                        {r.answer_type === "option" ? r.answer_option : ""}
-                      </td>
-                      <td className="p-2 border">
-                        {r.answer_type === "image" && r.media_url && (
-                          <img
-                            src={r.media_url}
-                            alt="Answer"
-                            className="h-12 w-12 object-cover cursor-pointer"
-                            onClick={() => setLightboxUrl(r.media_url!)}
-                          />
-                        )}
-                      </td>
-                      <td className="p-2 border">
-                        <input
-                          type="number"
-                          defaultValue={r.score ?? ""}
-                          onBlur={(e) =>
-                            handleScoreBlur(r.answer_id, e.target.value)
-                          }
-                          className="w-16 border p-1 rounded"
-                        />
-                      </td>
-                      <td className="p-2 border">{r.status}</td>
 
-                      {filterStatus === "requested" && (
-                        <td className="p-2 border space-x-2">
-                          <button
-                            className="btn btn-sm btn-success"
-                            onClick={async () => {
-                              // First: update status to 'approved'
-                              await fetch(
-                                `${api_startpoint}/api/vision_sessions/${r.answer_id}/status`,
-                                {
-                                  method: "PUT",
-                                  headers: {
-                                    "Content-Type": "application/json",
-                                  },
-                                  body: JSON.stringify({ status: "approved" }),
-                                }
-                              );
+            <div className="flex flex-wrap justify-between items-center gap-3 bg-white p-3 rounded-lg shadow-sm">
+              <div className="flex flex-wrap gap-3">
+                <select
+                  value={fStatus}
+                  onChange={(e) => handleFilterChange("status", e.target.value)}
+                  className="border p-2 rounded text-sm"
+                >
+                  <option value="">All Status</option>
+                  <option value="1">Active</option>
+                  <option value="0">Inactive</option>
+                </select>
 
-                              // Second: call score API to store points
-                              await fetch(
-                                `${api_startpoint}/api/vision_sessions/${r.answer_id}/score`,
-                                {
-                                  method: "PUT",
-                                  headers: {
-                                    "Content-Type": "application/json",
-                                  },
-                                  body: JSON.stringify({
-                                    points: r.points || 10,
-                                  }),
-                                }
-                              );
-
-                              // Refresh sessions
-                              fetchSessions();
-
-                              // NEW: Show confirmation modal
-                              setConfirmationModal({
-                                show: true,
-                                type: "approve",
-                                message:
-                                  "Vision session approved successfully!",
-                              });
-                            }}
-                          >
-                            Approved
-                          </button>
-
-                          <button
-                            className="btn btn-sm btn-danger"
-                            onClick={async () => {
-                              await fetch(
-                                `${api_startpoint}/api/vision_sessions/${r.answer_id}/status`,
-                                {
-                                  method: "PUT",
-                                  headers: {
-                                    "Content-Type": "application/json",
-                                  },
-                                  body: JSON.stringify({ status: "rejected" }),
-                                }
-                              );
-                              fetchSessions();
-
-                              // NEW: Show confirmation modal
-                              setConfirmationModal({
-                                show: true,
-                                type: "reject",
-                                message:
-                                  "Vision session rejected successfully!",
-                              });
-                            }}
-                          >
-                            Reject
-                          </button>
-                        </td>
-                      )}
-
-                      <td className="p-2 border">
-                        {new Date(r.created_at).toLocaleDateString()}
-                      </td>
-                    </tr>
+                <select
+                  value={fSubject}
+                  onChange={(e) =>
+                    handleFilterChange("subject", e.target.value)
+                  }
+                  className="border p-2 rounded text-sm"
+                >
+                  <option value="">All Subjects</option>
+                  {subjects.map((subject) => (
+                    <option key={subject.id} value={String(subject.id)}>
+                      {JSON.parse(subject.title).en}
+                    </option>
                   ))}
-                </tbody>
-              </table>
-            )}
-            {/* Pagination Controls */}
-            <div className="d-flex justify-content-between align-items-center p-3">
-              <button
-                className="btn btn-primary"
-                onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
-                disabled={page === 1}
-              >
-                Previous
-              </button>
+                </select>
 
-              <span>Page {page}</span>
-
+                <select
+                  value={fLevel}
+                  onChange={(e) => handleFilterChange("level", e.target.value)}
+                  className="border p-2 rounded text-sm"
+                >
+                  <option value="">All Levels</option>
+                  {levels.map((level) => (
+                    <option key={level.id} value={String(level.id)}>
+                      {JSON.parse(level.title).en}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <button
-                className="btn btn-primary"
-                onClick={() => setPage((prev) => prev + 1)}
-                disabled={rows.length < perPage}
+                onClick={() => setShowAdd(true)}
+                className="bg-sky-600 text-white px-4 py-2 rounded h-fit"
               >
-                Next
+                Add Vision
               </button>
             </div>
-            {/* Lightbox Modal */}
-            {lightboxUrl && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <img
-                  src={lightboxUrl}
-                  className="max-h-[90vh] object-contain"
-                />
-                <button
-                  className="absolute top-4 right-4 text-white text-2xl"
-                  onClick={() => setLightboxUrl(null)}
-                >
-                  ×
-                </button>
+
+            {loading ? (
+              <div className="flex justify-center items-center h-64">
+                <div className="animate-spin rounded-full w-12 h-12 border-t-2 border-sky-800"></div>
               </div>
+            ) : (
+              <>
+                <div className="overflow-x-auto bg-white rounded-lg shadow">
+                  <table className="w-full table-auto">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[60px]">
+                          Serial No.
+                        </th>
+                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">
+                          Title
+                        </th>
+                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[300px] max-w-[300px]">
+                          Description
+                        </th>
+                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[150px]">
+                          YouTube
+                        </th>
+                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
+                          Allow For
+                        </th>
+                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[150px]">
+                          Subject
+                        </th>
+                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[150px]">
+                          Level
+                        </th>
+                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
+                          Status
+                        </th>
+                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
+                          Details
+                        </th>
+                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[80px]">
+                          Index
+                        </th>
+                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {rows.length > 0 ? (
+                        rows.map((r, index) => (
+                          <React.Fragment key={r.vision_id}>
+                            <tr className="hover:bg-gray-50">
+                              <td className="p-3 text-sm min-w-[60px]">
+                                {(currentPage - 1) * perPage + index + 1}
+                              </td>
+                              <td className="p-3 text-sm min-w-[200px]">
+                                {r.title}
+                              </td>
+                              <td
+                                className="p-3 text-sm min-w-[300px] max-w-[300px] whitespace-normal break-words overflow-y-auto max-h-32"
+                                style={{ wordBreak: "break-word" }}
+                              >
+                                {r.description}
+                              </td>
+                              <td className="p-3 text-sm min-w-[150px]">
+                                {r.youtube_url ? (
+                                  <a
+                                    href={r.youtube_url}
+                                    target="_blank"
+                                    className="text-sky-600 hover:underline"
+                                  >
+                                    Link
+                                  </a>
+                                ) : (
+                                  "-"
+                                )}
+                              </td>
+                              <td className="p-3 text-sm min-w-[100px]">
+                                {r.allow_for === 1
+                                  ? "All"
+                                  : r.allow_for === 2
+                                  ? "Teacher"
+                                  : "Student"}
+                              </td>
+                              <td className="p-3 text-sm min-w-[150px]">
+                                {r.subject}
+                              </td>
+                              <td className="p-3 text-sm min-w-[150px]">
+                                {r.level}
+                              </td>
+                              <td className="p-3 text-sm min-w-[100px]">
+                                <span
+                                  className={`px-2 py-1 text-xs rounded-full ${
+                                    r.status === 1
+                                      ? "bg-green-100 text-green-800"
+                                      : "bg-red-100 text-red-800"
+                                  }`}
+                                >
+                                  {r.status === 1 ? "Active" : "Inactive"}
+                                </span>
+                              </td>
+                              <td className="p-3 text-sm min-w-[120px]">
+                                <button
+                                  onClick={() =>
+                                    setExpanded((e) => ({
+                                      ...e,
+                                      [r.vision_id]: !e[r.vision_id],
+                                    }))
+                                  }
+                                  className="text-sky-600 hover:text-sky-800"
+                                >
+                                  {expanded[r.vision_id]
+                                    ? "Hide Details"
+                                    : "Show Details"}
+                                </button>
+                              </td>
+                              <td className="p-3 text-sm min-w-[80px]">
+                                {r.index || "-"}
+                              </td>
+                              <td className="p-3 text-sm min-w-[120px]">
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => {
+                                      setEditRow(r);
+                                      setShowEdit(true);
+                                    }}
+                                    className="text-blue-600 hover:text-blue-800"
+                                  >
+                                    <IconEdit size={18} />
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setVisionToDelete(r);
+                                      setShowDeleteModal(true);
+                                    }}
+                                    className="text-red-600 hover:text-red-800"
+                                  >
+                                    <IconTrash size={18} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+
+                            {expanded[r.vision_id] && (
+                              <tr>
+                                <td colSpan={11} className="p-4 bg-gray-50">
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {r.questions.map((q) => (
+                                      <div
+                                        key={q.question_id}
+                                        className="bg-white p-4 rounded-lg shadow"
+                                      >
+                                        <div className="font-semibold text-gray-700">
+                                          [{q.question_type.toUpperCase()}{" "}
+                                          Question]
+                                        </div>
+                                        <div className="mt-2">{q.question}</div>
+                                        {q.question_type === "mcq" &&
+                                          q.options && (
+                                            <ul className="mt-3 space-y-2">
+                                              {Object.entries(q.options).map(
+                                                ([k, opt]) => (
+                                                  <li
+                                                    key={k}
+                                                    className="flex items-start"
+                                                  >
+                                                    <span className="font-medium mr-2">
+                                                      {k.toUpperCase()}:
+                                                    </span>
+                                                    <span>
+                                                      {opt}
+                                                      {q.correct_answer ===
+                                                        k && (
+                                                        <span className="ml-2 bg-green-100 text-green-800 text-xs px-2 py-1 rounded">
+                                                          Correct
+                                                        </span>
+                                                      )}
+                                                    </span>
+                                                  </li>
+                                                )
+                                              )}
+                                            </ul>
+                                          )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        ))
+                      ) : (
+                        <tr>
+                          <td
+                            colSpan={11}
+                            className="p-8 text-center text-gray-500"
+                          >
+                            No visions found
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {totalPages > 1 && (
+                  <div className="flex flex-col items-center mt-4">
+                    <div className="text-sm text-gray-700 mb-2">
+                      Showing {(currentPage - 1) * perPage + 1} to{" "}
+                      {Math.min(currentPage * perPage, totalCount)} of{" "}
+                      {totalCount} entries
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => handlePageChange(currentPage - 1)}
+                        disabled={currentPage === 1 || loading}
+                        className={`px-3 py-1 border rounded ${
+                          currentPage === 1 || loading
+                            ? "opacity-50 cursor-not-allowed"
+                            : "hover:bg-gray-100"
+                        }`}
+                      >
+                        Previous
+                      </button>
+
+                      {getPageNumbers().map((page, index) =>
+                        typeof page === "number" ? (
+                          <button
+                            key={page}
+                            onClick={() => handlePageChange(page)}
+                            className={`px-3 py-1 border rounded ${
+                              currentPage === page
+                                ? "bg-sky-600 text-white"
+                                : "bg-white hover:bg-gray-100"
+                            }`}
+                          >
+                            {page}
+                          </button>
+                        ) : (
+                          <span key={`ellipsis-${index}`} className="px-3 py-1">
+                            {page}
+                          </span>
+                        )
+                      )}
+
+                      <button
+                        onClick={() => handlePageChange(currentPage + 1)}
+                        disabled={currentPage === totalPages}
+                        className={`px-3 py-1 border rounded ${
+                          currentPage === totalPages
+                            ? "opacity-50 cursor-not-allowed"
+                            : "hover:bg-gray-100"
+                        }`}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
 
-            {/* NEW: Confirmation Modal */}
-            {confirmationModal.show && (
-              <div
-                className="position-fixed start-0 end-0 top-0 bottom-0 d-flex align-items-center justify-content-center"
-                style={{ zIndex: 1060 }}
-              >
-                <div
-                  className="bg-white rounded-lg shadow-lg p-5 border border-gray-300"
-                  style={{ width: "300px", zIndex: 1070 }}
-                >
-                  <div className="text-center">
-                    <div className="mb-3">
-                      {confirmationModal.type === "approve" ? (
-                        <IconCircleCheck
-                          className="text-green"
-                          size={48}
-                          strokeWidth={1.5}
-                        />
-                      ) : (
-                        <IconCircleX
-                          className="text-danger"
-                          size={48}
-                          strokeWidth={1.5}
-                        />
-                      )}
-                    </div>
-                    <h4 className="mb-3">
-                      {confirmationModal.type === "approve"
-                        ? "Vision Approved"
-                        : "Vision Rejected"}
-                    </h4>
-                    <p className="text-muted mb-4">
-                      {confirmationModal.message}
-                    </p>
+            {showDeleteModal && visionToDelete && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
+                <div className="bg-white rounded-xl shadow-lg p-6 w-full max-w-md">
+                  <h2 className="text-lg font-semibold mb-4">
+                    Confirm Deletion
+                  </h2>
+                  <p className="mb-6">
+                    Are you sure you want to delete{" "}
+                    <strong>{visionToDelete.title}</strong>?
+                  </p>
+                  <div className="flex justify-end gap-4">
                     <button
-                      className="btn btn-danger w-100" // Red button
-                      onClick={() =>
-                        setConfirmationModal({
-                          ...confirmationModal,
-                          show: false,
-                        })
-                      }
+                      onClick={() => {
+                        setShowDeleteModal(false);
+                        setVisionToDelete(null);
+                      }}
+                      className="px-4 py-2 rounded border border-gray-300 hover:bg-gray-50"
                     >
-                      OK
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleDelete}
+                      className="px-4 py-2 rounded bg-red-600 text-white hover:bg-red-700"
+                    >
+                      Delete
                     </button>
                   </div>
                 </div>
               </div>
+            )}
+
+            {showAdd && (
+              <AddEditModal
+                mode="add"
+                onClose={() => setShowAdd(false)}
+                onSuccess={() => {
+                  setShowAdd(false);
+                  fetchVisions();
+                }}
+              />
+            )}
+            {showEdit && editRow && (
+              <AddEditModal
+                mode="edit"
+                initial={editRow}
+                onClose={() => {
+                  setShowEdit(false);
+                  setEditRow(null);
+                }}
+                onSuccess={() => {
+                  setShowEdit(false);
+                  fetchVisions();
+                }}
+              />
             )}
           </div>
         </div>
