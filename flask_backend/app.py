@@ -2060,18 +2060,19 @@ def vision_teacher_completions_summary():
 ######################## STUDENT/ DASHBOARD APIs ##################################
 ###################################################################################
 ###################################################################################
-
 @app.route('/api/state_list', methods=['GET'])
 def get_state_list():
     connection = get_db_connection()
     try:
+        
         with connection.cursor() as cursor:
             sql = """
-                SELECT DISTINCT(state) FROM lifeapp.users 
-                WHERE state != 'null' AND state != '2';
+                select distinct(state) from lifeapp.users where state != 'null' and state != '2';
             """
             cursor.execute(sql)
             result = cursor.fetchall()
+            
+            # print("Query Result:", result)  # Debugging statement
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2093,7 +2094,7 @@ def get_city_list_teachers():
                 WHERE state = %s 
                   AND city IS NOT NULL AND city != ''
             """
-            cursor.execute(sql, (state,))
+            cursor.execute(sql, (state))
             result = cursor.fetchall()
             cities = [row['city'] for row in result]
         return jsonify(cities), 200
@@ -2107,9 +2108,13 @@ def get_school_list():
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            sql = "SELECT DISTINCT(name) FROM lifeapp.schools;"
+            sql = """
+                select distinct(name) from lifeapp.schools;
+            """
             cursor.execute(sql)
             result = cursor.fetchall()
+            
+            # print("Query Result:", result)  # Debugging statement
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2121,15 +2126,20 @@ def get_new_school_list():
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            sql = "SELECT DISTINCT(name), id, code FROM lifeapp.schools;"
+            sql = """
+                select distinct(name), id, code from lifeapp.schools;
+            """
             cursor.execute(sql)
             result = cursor.fetchall()
+            
+            # print("Query Result:", result)  # Debugging statement
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         connection.close()
 
+# New endpoint for filtering/searching the mission completes data
 @app.route('/api/student_dashboard_search', methods=['POST'])
 def search():
     filters = request.get_json() or {}
@@ -2138,115 +2148,110 @@ def search():
     city = filters.get('city')
     grade = filters.get('grade')
     mission_type = filters.get('mission_type')
-    mission_acceptance = filters.get('mission_acceptance') or []  # Now array
-    vision_acceptance = filters.get('vision_acceptance') or []    # Now array
+    mission_acceptance = filters.get('mission_acceptance')
     requested_count = filters.get('mission_requested_no')
     accepted_count = filters.get('mission_accepted_no')
+    vision_acceptance = filters.get('vision_acceptance')
+    vision_requested_no = filters.get('vision_requested_no')
+    vision_accepted_no = filters.get('vision_accepted_no')
     earn_coins = filters.get('earn_coins')
     from_date = filters.get('from_date')
     to_date = filters.get('to_date')
     mobile_no = filters.get('mobile_no')
     schoolCodes = filters.get('schoolCode')
     
-    # Build the base query with the CTE
+    # Build the base query with CTEs
     sql = """
-    WITH user_mission_stats AS (
-        SELECT 
-            user_id,
-            COUNT(*) AS total_missions_requested,
-            SUM(CASE WHEN approved_at IS NOT NULL THEN 1 ELSE 0 END) AS total_missions_accepted
-        FROM lifeapp.la_mission_completes
-        GROUP BY user_id
-    ),
-    user_vision_stats AS (
-        SELECT 
-            user_id,
-            COUNT(*) AS total_visions_requested,
-            SUM(CASE WHEN approved_at IS NOT NULL THEN 1 ELSE 0 END) AS total_visions_approved,
-            SUM(CASE WHEN rejected_at IS NOT NULL THEN 1 ELSE 0 END) AS total_visions_rejected
-        FROM lifeapp.vision_question_answers
-        GROUP BY user_id
-    ),
-    cte AS (
-        SELECT 
-            u.id, u.name, ls.name AS school_name, u.guardian_name, u.email, u.username, 
-            u.mobile_no, u.dob, u.type AS user_type, u.grade, u.city, u.state, 
-            u.address, u.earn_coins, u.heart_coins, u.brain_coins, u.school_id, u.school_code, 
-            u.created_at as registered_at, 
-            ums.total_missions_requested, ums.total_missions_accepted,
-            COALESCE(uvs.total_visions_requested, 0) AS total_visions_requested,
-            COALESCE(uvs.total_visions_approved, 0) AS total_visions_approved,
-            COALESCE(uvs.total_visions_rejected, 0) AS total_visions_rejected
-        FROM lifeapp.users u
-        INNER JOIN lifeapp.schools ls ON ls.id = u.school_id
-        LEFT JOIN user_mission_stats ums ON ums.user_id = u.id
-        LEFT JOIN user_vision_stats uvs ON uvs.user_id = u.id
-        WHERE u.type = 3 
+    WITH 
+        user_mission_stats AS (
+            SELECT 
+                user_id,
+                COUNT(*) AS total_missions_requested,
+                SUM(CASE WHEN approved_at IS NOT NULL THEN 1 ELSE 0 END) AS total_missions_accepted
+            FROM lifeapp.la_mission_completes
+            GROUP BY user_id
+        ),
+        user_vision_stats AS (
+            SELECT 
+                user_id,
+                COUNT(*) AS total_visions_requested,
+                SUM(CASE WHEN approved_at IS NOT NULL THEN 1 ELSE 0 END) AS total_visions_accepted
+            FROM lifeapp.vision_question_answers
+            GROUP BY user_id
+        ),
+        cte AS (
+            SELECT 
+                u.id, u.name, ls.name AS school_name, u.guardian_name, u.email, u.username, 
+                u.mobile_no, u.dob, u.type AS user_type, u.grade, u.city, u.state, 
+                u.address, u.earn_coins, u.heart_coins, u.brain_coins, u.school_id, u.school_code, u.created_at as registered_at, 
+                COALESCE(ums.total_missions_requested, 0) AS total_missions_requested,
+                COALESCE(ums.total_missions_accepted, 0) AS total_missions_accepted,
+                COALESCE(vs.total_visions_requested, 0) AS total_visions_requested,
+                COALESCE(vs.total_visions_accepted, 0) AS total_visions_accepted
+            FROM lifeapp.users u
+            INNER JOIN lifeapp.schools ls ON ls.id = u.school_id
+            LEFT JOIN user_mission_stats ums ON ums.user_id = u.id
+            LEFT JOIN user_vision_stats vs ON vs.user_id = u.id
+            WHERE u.type = 3 
     """
     params = []
     
-    # Filter conditions
+    # Append filter conditions
     if state:
         sql += " AND u.state = %s"
         params.append(state)
+    
     if school:
-        if isinstance(school, list):
+        if isinstance(school, list) and len(school) > 0:
             if len(school) == 1:
                 sql += " AND ls.name = %s"
                 params.append(school[0])
             else:
                 sql += " AND ls.name IN %s"
                 params.append(tuple(school))
-        else:
+        elif school:
             sql += " AND ls.name = %s"
             params.append(school)
+    
     if city:
         sql += " AND u.city = %s"
         params.append(city)
+    
     if grade:
         sql += " AND u.grade = %s"
         params.append(grade)
-    if mission_type:
-        sql += " AND m.type = %s"
-        if mission_type == 'Mission':
-            params.append(1)
-        elif mission_type == 'Pragya':
-            params.append(6)
-        else:
-            params.append(5)
     
-    # Mission acceptance filter (array-based)
-    if mission_acceptance:
-        mission_conditions = []
-        if 'accepted' in mission_acceptance:
-            mission_conditions.append("ums.total_missions_accepted > 0")
-        if 'rejected' in mission_acceptance:
-            mission_conditions.append("ums.total_missions_accepted = 0")
-            
-        if mission_conditions:
-            sql += " AND (" + " OR ".join(mission_conditions) + ")"
-    
-    # Vision acceptance filter (array-based)
-    if vision_acceptance:
-        vision_conditions = []
-        if 'approved' in vision_acceptance:
-            vision_conditions.append("uvs.total_visions_approved > 0")
-        if 'rejected' in vision_acceptance:
-            vision_conditions.append("uvs.total_visions_rejected > 0")
-        if 'requested' in vision_acceptance:
-            vision_conditions.append("(uvs.total_visions_approved = 0 AND uvs.total_visions_rejected = 0 AND uvs.total_visions_requested > 0)")
-            
-        if vision_conditions:
-            sql += " AND (" + " OR ".join(vision_conditions) + ")"
 
-    # Mission count filters
+    # Mission acceptance filter (updated with COALESCE)
+    if mission_acceptance:
+        if mission_acceptance == 'accepted':
+            sql += " AND COALESCE(ums.total_missions_accepted, 0) > 0 "
+        else:
+            sql += " AND COALESCE(ums.total_missions_accepted, 0) = 0 "
+    
+    # Vision acceptance filter (updated with COALESCE)
+    if vision_acceptance:
+        if vision_acceptance == 'accepted':
+            sql += " AND COALESCE(vs.total_visions_accepted, 0) > 0 "
+        else:
+            sql += " AND COALESCE(vs.total_visions_accepted, 0) = 0 "
+    
+    # Mission count filters (updated with COALESCE)
     if requested_count:
-        sql += " AND ums.total_missions_requested = %s"
+        sql += " AND COALESCE(ums.total_missions_requested, 0) = %s"
         params.append(int(requested_count))
     if accepted_count:
-        sql += " AND ums.total_missions_accepted = %s"
+        sql += " AND COALESCE(ums.total_missions_accepted, 0) = %s"
         params.append(int(accepted_count))
-
+        
+    # Vision count filters (updated with COALESCE)
+    if vision_requested_no:
+        sql += " AND COALESCE(vs.total_visions_requested, 0) = %s"
+        params.append(int(vision_requested_no))
+    if vision_accepted_no:
+        sql += " AND COALESCE(vs.total_visions_accepted, 0) = %s"
+        params.append(int(vision_accepted_no))
+        
     if earn_coins:
         if earn_coins == "0-100":
             sql += " AND u.earn_coins BETWEEN 0 AND 100"
@@ -2257,18 +2262,19 @@ def search():
         elif earn_coins == "1000+":
             sql += " AND u.earn_coins > 1000"
 
-    if schoolCodes:
-        codes = schoolCodes if isinstance(schoolCodes, list) else [schoolCodes]
-        placeholders = ",".join(["%s"] * len(codes))
+    if schoolCodes and isinstance(schoolCodes, list) and len(schoolCodes) > 0:
+        placeholders = ",".join(["%s"] * len(schoolCodes))
         sql += f" AND u.school_code IN ({placeholders})"
-        params.extend([int(c) for c in codes])
+        params.extend([code for code in schoolCodes if code])
         
     if mobile_no:
         sql += " AND u.mobile_no = %s"
         params.append(mobile_no)
+    
     if from_date:
         sql += " AND u.created_at >= %s"
         params.append(from_date)
+    
     if to_date:
         sql += " AND u.created_at <= %s"
         params.append(to_date)
@@ -2285,7 +2291,6 @@ def search():
         return jsonify({'error': str(e)}), 500
     finally:
         connection.close()
-
 @app.route('/api/add_student', methods=['POST'])
 def add_student():
     data = request.get_json() or {}
@@ -7567,81 +7572,119 @@ def delete_today_questions_and_options():
 ############## RESOURCES/STUDENT_RELATED/VISIONS APIs ######################
 ###################################################################################
 ###################################################################################
-# 1. Fetch Visions + Questions (with filters)
+# 1. Fetch Visions + Questions (with filters and pagination)
+
 @app.route('/api/visions', methods=['GET'])
 def fetch_visions():
-    # URL query params: status, subject_id, level_id
-    qs      = request.args
-    status  = qs.get('status')       # '1','0' or None
+    qs = request.args
+    status = qs.get('status')
     subject = qs.get('subject_id')
-    level   = qs.get('level_id')
+    level = qs.get('level_id')
+    page = int(qs.get('page', 1))
+    per_page = int(qs.get('per_page', 30))
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # fetch vision + question rows
+            # Build count query
+            count_sql = "SELECT COUNT(DISTINCT v.id) AS total FROM lifeapp.visions v WHERE 1=1"
+            count_params = []
+            if status in ('0','1'):
+                count_sql += " AND v.status=%s"
+                count_params.append(int(status))
+            if subject:
+                count_sql += " AND v.la_subject_id=%s"
+                count_params.append(subject)
+            if level:
+                count_sql += " AND v.la_level_id=%s"
+                count_params.append(level)
+                
+            cursor.execute(count_sql, count_params)
+            total = cursor.fetchone()['total']
+
+            # Build main query
             sql = """
             SELECT
-              v.id            AS vision_id,
-              v.index         AS idx,
-              JSON_UNQUOTE(JSON_EXTRACT(v.title,'$.en'))       AS title,
-              JSON_UNQUOTE(JSON_EXTRACT(v.description,'$.en')) AS description,
-              v.youtube_url,
-              v.allow_for,
-              JSON_UNQUOTE(JSON_EXTRACT(s.title,'$.en'))       AS subject,
-              JSON_UNQUOTE(JSON_EXTRACT(l.title,'$.en'))       AS level,
-              v.status,
-              q.id            AS question_id,
-              q.question_type,
-              JSON_UNQUOTE(JSON_EXTRACT(q.question,'$.en'))    AS question,
-              q.options,
-              q.correct_answer
+                v.id AS vision_id,
+                v.index AS idx,
+                JSON_UNQUOTE(JSON_EXTRACT(v.title,'$.en')) AS title,
+                JSON_UNQUOTE(JSON_EXTRACT(v.description,'$.en')) AS description,
+                v.youtube_url,
+                v.allow_for,
+                JSON_UNQUOTE(JSON_EXTRACT(s.title,'$.en')) AS subject,
+                JSON_UNQUOTE(JSON_EXTRACT(l.title,'$.en')) AS level,
+                v.status,
+                q.id AS question_id,
+                q.question_type,
+                JSON_UNQUOTE(JSON_EXTRACT(q.question,'$.en')) AS question,
+                q.options,
+                q.correct_answer
             FROM lifeapp.visions v
             LEFT JOIN lifeapp.la_subjects s ON s.id = v.la_subject_id
-            LEFT JOIN lifeapp.la_levels   l ON l.id = v.la_level_id
+            LEFT JOIN lifeapp.la_levels l ON l.id = v.la_level_id
             LEFT JOIN lifeapp.vision_questions q ON q.vision_id = v.id
             WHERE 1=1
             """
             params = []
             if status in ('0','1'):
-                sql += " AND v.status=%s";    params.append(int(status))
+                sql += " AND v.status=%s"
+                params.append(int(status))
             if subject:
-                sql += " AND v.la_subject_id=%s"; params.append(subject)
+                sql += " AND v.la_subject_id=%s"
+                params.append(subject)
             if level:
-                sql += " AND v.la_level_id=%s";   params.append(level)
+                sql += " AND v.la_level_id=%s"
+                params.append(level)
 
-            sql += " ORDER BY v.id DESC"
+            sql += " ORDER BY v.id DESC LIMIT %s OFFSET %s"
+            offset = (page - 1) * per_page
+            params.extend([per_page, offset])
+            
             cursor.execute(sql, params)
             rows = cursor.fetchall()
-
-            # group per vision
+            
+            # Group visions
             visions = {}
             for r in rows:
                 vid = r['vision_id']
                 if vid not in visions:
                     visions[vid] = {
-                      'vision_id': vid,
-                      'title':     r['title'],
-                      'description': r['description'],
-                      'youtube_url': r['youtube_url'],
-                      'allow_for':   r['allow_for'],
-                      'subject':     r['subject'],
-                      'level':       r['level'],
-                      'status':      r['status'],
-                      'index':      r['idx'],
-                      'questions': []
+                        'vision_id': vid,
+                        'title': r['title'],
+                        'description': r['description'],
+                        'youtube_url': r['youtube_url'],
+                        'allow_for': r['allow_for'],
+                        'subject': r['subject'],
+                        'level': r['level'],
+                        'status': r['status'],
+                        'index': r['idx'],
+                        'questions': []
                     }
-                # append each question
-                visions[vid]['questions'].append({
-                  'question_id':    r['question_id'],
-                  'question_type':  r['question_type'],
-                  'question':       r['question'],
-                  'options':        r['options'] and json.loads(r['options']),
-                  'correct_answer': r['correct_answer']
-                })
-            return jsonify(list(visions.values())), 200
+                # Only add question if it exists
+                if r['question_id']:
+                    # Safely parse options JSON
+                    options = None
+                    if r['options']:
+                        try:
+                            options = json.loads(r['options'])
+                        except:
+                            options = None
+                            
+                    visions[vid]['questions'].append({
+                        'question_id': r['question_id'],
+                        'question_type': r['question_type'],
+                        'question': r['question'],
+                        'options': options,
+                        'correct_answer': r['correct_answer']
+                    })
+                    
+            return jsonify({
+                'visions': list(visions.values()),
+                'total': total
+            }), 200
 
     except Exception as e:
+        app.logger.error(f"Error fetching visions: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
@@ -7811,21 +7854,6 @@ def delete_vision(vision_id):
 ######################## SETTINGS/SUBJECTS APIs ###################################
 ###################################################################################
 ###################################################################################
-
-# @app.route('/api/subjects_list', methods=['POST'])
-# def get_subjects():
-#     """Fetch all subjects."""
-#     try:
-#         connection = get_db_connection()
-#         with connection.cursor() as cursor:
-#             sql = "SELECT id, title, heading, image, status FROM lifeapp.la_subjects ORDER BY id;"
-#             cursor.execute(sql)
-#             subjects = cursor.fetchall()
-#         return jsonify(subjects)
-#     except Exception as e:
-#         return jsonify({'error': str(e)}), 500
-#     finally:
-#         connection.close()
 
 @app.route('/api/subjects_list', methods=['POST'])
 def get_subjects():
@@ -9708,36 +9736,110 @@ def quiz_list():
         conn.close()
 
 # ————— Campaign Details Functions —————
-def handle_vision_details(conn, cursor, vision_id, start_date, campaign):
-    """Calculate statistics for Vision campaigns"""
-    # Determine time period
+
+@app.route('/api/campaigns/<int:id>/details', methods=['GET'])
+def get_campaign_details(id):
+    """Fetch statistics for a specific campaign"""
+    school_code = request.args.get('school_code')  # Get school_code from query string
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, game_type, reference_id, scheduled_for, status, ended_at
+                FROM la_campaigns 
+                WHERE id = %s
+            """, (id,))
+            campaign = cursor.fetchone()
+            
+            if not campaign:
+                return jsonify({'error': 'Campaign not found'}), 404
+
+            game_type = campaign['game_type']
+            reference_id = campaign['reference_id']
+            start_date = campaign['scheduled_for']
+            
+            if game_type == 7:
+                stats = handle_vision_details(conn, cursor, reference_id, start_date, campaign, school_code)
+                return jsonify(stats), 200
+            elif game_type == 1:
+                stats = handle_mission_details(conn, cursor, reference_id, start_date, school_code)
+                return jsonify(stats), 200
+            elif game_type == 2:
+                stats = handle_quiz_details(conn, cursor, reference_id, start_date, campaign, school_code)
+                return jsonify(stats), 200
+            else:
+                return jsonify({
+                    'total_submission': 0,
+                    'total_coins_earned': 0
+                }), 200
+                
+    except Exception as e:
+        logger.error(f"Error fetching campaign details: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+def handle_vision_details(conn, cursor, vision_id, start_date, campaign, school_code=None):
+    """Calculate statistics for Vision campaigns with school code filter"""
     start_datetime = datetime.combine(start_date, time.min)
     end_datetime = datetime.now()
     
-    # Use ended_at if campaign is inactive
     if campaign['status'] == 0 and campaign['ended_at']:
         end_datetime = campaign['ended_at']
 
-    # Get distinct users
-    cursor.execute("""
-        SELECT DISTINCT user_id 
-        FROM vision_question_answers 
-        WHERE vision_id = %s 
-          AND is_first_attempt = 1 
-          AND created_at BETWEEN %s AND %s
-    """, (vision_id, start_datetime, end_datetime))
+    # Distinct users query with school code filter
+    distinct_user_query = """
+        SELECT DISTINCT vqa.user_id 
+        FROM vision_question_answers vqa
+        INNER JOIN lifeapp.users u ON vqa.user_id = u.id
+        WHERE vqa.vision_id = %s 
+          AND vqa.is_first_attempt = 1 
+          AND vqa.created_at BETWEEN %s AND %s
+    """
+    params = [vision_id, start_datetime, end_datetime]
+    
+    if school_code:
+        distinct_user_query += " AND u.school_code = %s"
+        params.append(school_code)
+    
+    cursor.execute(distinct_user_query, tuple(params))
     user_rows = cursor.fetchall()
-    user_ids = [row['user_id'] for row in user_rows] or [0]
+    
+    # DEBUG: Log the query and results
+    print(f"Vision stats query: {distinct_user_query}")
+    print(f"Query params: {params}")
+    print(f"User rows: {user_rows}")
+    print(f"Number of participants: {len(user_rows)}")
+    
+    # FIX: Properly handle empty user list
+    if not user_rows:
+        # Return zero stats if no participants found
+        return {
+            'total_submission': 0,
+            'total_approved': 0,
+            'total_rejected': 0,
+            'total_requested': 0,
+            'total_coins_earned': 0
+        }
+    
+    # Extract user IDs from the result
+    user_ids = [row['user_id'] for row in user_rows]
 
-    # Get all answers for these users
-    cursor.execute("""
-        SELECT user_id, status, score 
-        FROM vision_question_answers 
-        WHERE vision_id = %s 
-          AND is_first_attempt = 1 
-          AND user_id IN %s
-    """, (vision_id, tuple(user_ids)))
-    answer_rows = cursor.fetchall()
+    # FIX: Use proper placeholder syntax for IN clause with variable length
+    if user_ids:
+        # Get all answers for filtered users
+        placeholders = ','.join(['%s'] * len(user_ids))
+        answer_query = f"""
+            SELECT user_id, status, score 
+            FROM vision_question_answers 
+            WHERE vision_id = %s 
+              AND is_first_attempt = 1 
+              AND user_id IN ({placeholders})
+        """
+        cursor.execute(answer_query, [vision_id] + user_ids)
+        answer_rows = cursor.fetchall()
+    else:
+        answer_rows = []
 
     # Process results
     user_status = {}
@@ -9748,31 +9850,24 @@ def handle_vision_details(conn, cursor, vision_id, start_date, campaign):
         status = row['status']
         score = row['score'] or 0
         
-        # Track coins for approved answers
         if status == 'approved':
             user_coins[user_id] += score
             
-        # Track overall status per user
         if user_id not in user_status:
             user_status[user_id] = status
         else:
-            # If any answer is rejected, mark user as rejected
+            # Update status based on the most restrictive condition
             if status == 'rejected' or user_status[user_id] == 'rejected':
                 user_status[user_id] = 'rejected'
-            # If current is requested and not rejected, mark as requested
             elif (status == 'requested' or status is None) and user_status[user_id] != 'rejected':
                 user_status[user_id] = 'requested'
-            # Only mark as approved if all answers are approved
             elif status == 'approved' and user_status[user_id] == 'approved':
                 user_status[user_id] = 'approved'
 
-    # Count statuses
     total_submission = len(user_ids)
     total_approved = sum(1 for s in user_status.values() if s == 'approved')
     total_rejected = sum(1 for s in user_status.values() if s == 'rejected')
     total_requested = sum(1 for s in user_status.values() if s == 'requested')
-    
-    # Calculate total coins
     total_coins_earned = sum(user_coins.values())
 
     return {
@@ -9782,16 +9877,15 @@ def handle_vision_details(conn, cursor, vision_id, start_date, campaign):
         'total_requested': total_requested,
         'total_coins_earned': total_coins_earned
     }
-
-def handle_mission_details(conn, cursor, mission_id, start_date):
-    """Calculate statistics for Mission campaigns"""
+def handle_mission_details(conn, cursor, mission_id, start_date, school_code=None):
+    """Calculate statistics for Mission campaigns with school code filter"""
     start_datetime = datetime.combine(start_date, time.min)
     end_datetime = datetime.now()
 
-    # Get first submissions
-    cursor.execute("""
+    mission_query = """
         SELECT m.user_id, m.approved_at, m.rejected_at, m.points
         FROM la_mission_completes m
+        INNER JOIN lifeapp.users u ON m.user_id = u.id
         INNER JOIN (
             SELECT user_id, MIN(created_at) as first_submit
             FROM la_mission_completes
@@ -9799,10 +9893,16 @@ def handle_mission_details(conn, cursor, mission_id, start_date):
               AND created_at BETWEEN %s AND %s
             GROUP BY user_id
         ) as firsts ON m.user_id = firsts.user_id AND m.created_at = firsts.first_submit
-    """, (mission_id, start_datetime, end_datetime))
+    """
+    params = [mission_id, start_datetime, end_datetime]
+    
+    if school_code:
+        mission_query += " WHERE u.school_code = %s"
+        params.append(school_code)
+
+    cursor.execute(mission_query, tuple(params))
     mission_rows = cursor.fetchall()
 
-    # Process results
     total_submission = len(mission_rows)
     total_approved = 0
     total_rejected = 0
@@ -9826,81 +9926,37 @@ def handle_mission_details(conn, cursor, mission_id, start_date):
         'total_coins_earned': total_coins_earned
     }
 
-def handle_quiz_details(conn, cursor, topic_id, start_date, campaign):
-    """Calculate statistics for Quiz campaigns"""
-    # Determine time period
+def handle_quiz_details(conn, cursor, topic_id, start_date, campaign, school_code=None):
+    """Calculate statistics for Quiz campaigns with school code filter"""
     start_datetime = datetime.combine(start_date, time.min)
     end_datetime = datetime.now()
     
-    # Use ended_at if campaign is inactive
     if campaign['status'] == 0 and campaign['ended_at']:
         end_datetime = campaign['ended_at']
 
-    # Get distinct users and total coins
-    cursor.execute("""
+    quiz_query = """
         SELECT 
             COUNT(DISTINCT g.user_id) AS total_submission,
             COALESCE(SUM(r.coins), 0) AS total_coins_earned
         FROM la_quiz_games g
         LEFT JOIN la_quiz_game_results r ON g.id = r.la_quiz_game_id
+        INNER JOIN lifeapp.users u ON g.user_id = u.id
         WHERE g.la_topic_id = %s
           AND g.created_at BETWEEN %s AND %s
-    """, (topic_id, start_datetime, end_datetime))
+    """
+    params = [topic_id, start_datetime, end_datetime]
+    
+    if school_code:
+        quiz_query += " AND u.school_code = %s"
+        params.append(school_code)
+
+    cursor.execute(quiz_query, tuple(params))
     result = cursor.fetchone()
     
     return {
         'total_submission': result['total_submission'] or 0,
         'total_coins_earned': result['total_coins_earned'] or 0
     }
-
-@app.route('/api/campaigns/<int:id>/details', methods=['GET'])
-def get_campaign_details(id):
-    """Fetch statistics for a specific campaign"""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            # Fetch campaign by ID
-            cursor.execute("""
-                SELECT id, game_type, reference_id, scheduled_for, status, ended_at
-                FROM la_campaigns 
-                WHERE id = %s
-            """, (id,))
-            campaign = cursor.fetchone()
-            
-            if not campaign:
-                return jsonify({'error': 'Campaign not found'}), 404
-
-            game_type = campaign['game_type']
-            reference_id = campaign['reference_id']
-            start_date = campaign['scheduled_for']
-            
-            # Handle Vision campaigns (game_type=7)
-            if game_type == 7:
-                stats = handle_vision_details(conn, cursor, reference_id, start_date, campaign)
-                return jsonify(stats), 200
-            
-            # Handle Mission campaigns (game_type=1)
-            elif game_type == 1:
-                stats = handle_mission_details(conn, cursor, reference_id, start_date)
-                return jsonify(stats), 200
-            
-            # Handle Quiz campaigns (game_type=2)
-            elif game_type == 2:
-                stats = handle_quiz_details(conn, cursor, reference_id, start_date, campaign)
-                return jsonify(stats), 200
-            
-            # Return zeros for other types
-            else:
-                return jsonify({
-                    'total_submission': 0,
-                    'total_coins_earned': 0
-                }), 200
-                
-    except Exception as e:
-        logger.error(f"Error fetching campaign details: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-    finally:
-        conn.close()
-
+    
 if __name__ == '__main__':
     app.run(debug=True,  use_reloader=True)
