@@ -62,11 +62,11 @@ export default function Campaigns() {
   });
   const [page, setPage] = useState<number>(1);
   const [total, setTotal] = useState<number>(0);
-  // Delete modal state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [campaignToDelete, setCampaignToDelete] = useState<Campaign | null>(
     null
   );
+  const [schoolCode, setSchoolCode] = useState(""); // New state for school code filter
 
   const fetchCampaigns = async (page = 1) => {
     setLoading(true);
@@ -84,11 +84,16 @@ export default function Campaigns() {
     }
   };
 
-  const fetchCampaignStats = async (campaignId: number) => {
+  // Updated to accept school code parameter
+  const fetchCampaignStats = async (campaignId: number, code: string) => {
     setDetailsModal((prev) => ({ ...prev, loading: true }));
     try {
+      const qs = new URLSearchParams();
+      if (code) {
+        qs.append("school_code", code);
+      }
       const res = await fetch(
-        `${api_startpoint}/api/campaigns/${campaignId}/details`
+        `${api_startpoint}/api/campaigns/${campaignId}/details?${qs}`
       );
       const stats = await res.json();
       setDetailsModal((prev) => ({ ...prev, stats }));
@@ -109,13 +114,14 @@ export default function Campaigns() {
   const closeModal = () => setModal(false);
 
   const openDetails = (campaign: Campaign) => {
+    setSchoolCode(""); // Reset school code when opening new details
     setDetailsModal({
       open: true,
       campaign,
       stats: null,
       loading: true,
     });
-    fetchCampaignStats(campaign.id);
+    fetchCampaignStats(campaign.id, "");
   };
 
   const closeDetails = () =>
@@ -295,6 +301,38 @@ export default function Campaigns() {
                     ></button>
                   </div>
                   <div className="modal-body">
+                    {/* School Code Filter */}
+                    <div className="mb-4">
+                      <label className="form-label">School Code Filter</label>
+                      <div className="input-group">
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={schoolCode}
+                          onChange={(e) => setSchoolCode(e.target.value)}
+                          placeholder="Enter school code"
+                        />
+                        <button
+                          className="btn btn-outline-primary"
+                          type="button"
+                          onClick={() => {
+                            if (detailsModal.campaign) {
+                              fetchCampaignStats(
+                                detailsModal.campaign.id,
+                                schoolCode
+                              );
+                            }
+                          }}
+                        >
+                          Apply
+                        </button>
+                      </div>
+                      <div className="form-text">
+                        Filter stats by school code (leave blank for all
+                        schools)
+                      </div>
+                    </div>
+
                     {detailsModal.loading ? (
                       <div className="text-center py-4">
                         <div
