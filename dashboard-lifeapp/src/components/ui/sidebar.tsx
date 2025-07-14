@@ -1,5 +1,4 @@
 "use client";
-
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -172,7 +171,11 @@ export function Sidebar() {
         </div>
 
         <nav className="space-y-0.5">
-          <NavItem href="/" label="Dashboard" icon={<Home className="h-3 w-3" />} />
+          <NavItem
+            href="/"
+            label="Dashboard"
+            icon={<Home className="h-3 w-3" />}
+          />
           <NavItem
             href="#"
             label="Students"
@@ -185,8 +188,16 @@ export function Sidebar() {
             <div className="space-y-0.5 ml-5">
               <NavItem href="/students/dashboard" label="Dashboard" isNested />
               <NavItem href="/students/mission" label="Mission" isNested />
-              <NavItem href="/students/coupons_redeemed" label="Coupon Redeemed" isNested />
-              <NavItem href="/students/quiz_sessions" label="Quiz Sessions" isNested />
+              <NavItem
+                href="/students/coupons_redeemed"
+                label="Coupon Redeemed"
+                isNested
+              />
+              <NavItem
+                href="/students/quiz_sessions"
+                label="Quiz Sessions"
+                isNested
+              />
               <NavItem href="/students/vision" label="Vision" isNested />
             </div>
           )}
@@ -202,6 +213,11 @@ export function Sidebar() {
           {openSections.teachers && (
             <div className="space-y-0.5 ml-5">
               <NavItem href="/teachers/dashboard" label="Dashboard" isNested />
+              <NavItem
+                href="/teachers/coupons_redeemed"
+                label="Coupon Redeemed"
+                isNested
+              />
             </div>
           )}
 
@@ -231,7 +247,11 @@ export function Sidebar() {
           {openSections.schools && (
             <div className="space-y-0.5 ml-5">
               <NavItem href="/schools/dashboard" label="Dashboard" isNested />
-              <NavItem href="/schools/school-data" label="School Data" isNested />
+              <NavItem
+                href="/schools/school-data"
+                label="School Data"
+                isNested
+              />
             </div>
           )}
 
@@ -255,13 +275,37 @@ export function Sidebar() {
               />
               {openSections.student_related && (
                 <div className="!pl-4 space-y-0.5">
-                  <NavItem href="/student_related/mission" label="Mission" isNested />
-                  <NavItem href="/student_related/jigyasa" label="Jigyasa" isNested />
-                  <NavItem href="/student_related/pragya" label="Pragya" isNested />
+                  <NavItem
+                    href="/student_related/mission"
+                    label="Mission"
+                    isNested
+                  />
+                  <NavItem
+                    href="/student_related/jigyasa"
+                    label="Jigyasa"
+                    isNested
+                  />
+                  <NavItem
+                    href="/student_related/pragya"
+                    label="Pragya"
+                    isNested
+                  />
                   <NavItem href="/student_related/quiz" label="Quiz" isNested />
-                  <NavItem href="/student_related/riddle" label="Riddle" isNested />
-                  <NavItem href="/student_related/puzzle" label="Puzzle" isNested />
-                  <NavItem href="/student_related/vision" label="Vision" isNested />
+                  <NavItem
+                    href="/student_related/riddle"
+                    label="Riddle"
+                    isNested
+                  />
+                  <NavItem
+                    href="/student_related/puzzle"
+                    label="Puzzle"
+                    isNested
+                  />
+                  <NavItem
+                    href="/student_related/vision"
+                    label="Vision"
+                    isNested
+                  />
                 </div>
               )}
 
@@ -275,13 +319,41 @@ export function Sidebar() {
               />
               {openSections.resources_teachers && (
                 <div className="!pl-4 space-y-0.5">
-                  <NavItem href="/teachers/competencies" label="Competencies" isNested />
-                  <NavItem href="/teachers/concept-cartoon-header" label="Concept Cartoon header" isNested />
-                  <NavItem href="/teachers/concept-cartoons" label="Concept Cartoon" isNested />
-                  <NavItem href="/teachers/assessment" label="Assessment" isNested />
-                  <NavItem href="/teachers/worksheets" label="Work Sheets" isNested />
-                  <NavItem href="/teachers/lesson-plan-language" label="Lesson Plan Language" isNested />
-                  <NavItem href="/teachers/lesson-plans" label="Lesson Plans" isNested />
+                  <NavItem
+                    href="/teachers/competencies"
+                    label="Competencies"
+                    isNested
+                  />
+                  <NavItem
+                    href="/teachers/concept-cartoon-header"
+                    label="Concept Cartoon header"
+                    isNested
+                  />
+                  <NavItem
+                    href="/teachers/concept-cartoons"
+                    label="Concept Cartoon"
+                    isNested
+                  />
+                  <NavItem
+                    href="/teachers/assessment"
+                    label="Assessment"
+                    isNested
+                  />
+                  <NavItem
+                    href="/teachers/worksheets"
+                    label="Work Sheets"
+                    isNested
+                  />
+                  <NavItem
+                    href="/teachers/lesson-plan-language"
+                    label="Lesson Plan Language"
+                    isNested
+                  />
+                  <NavItem
+                    href="/teachers/lesson-plans"
+                    label="Lesson Plans"
+                    isNested
+                  />
                 </div>
               )}
             </div>
@@ -304,13 +376,30 @@ export function Sidebar() {
               <NavItem href="/settings/boards" label="Boards" isNested />
               <NavItem href="/settings/topics" label="Topics" isNested />
               <NavItem href="/settings/coupons" label="Coupons" isNested />
-              <NavItem href="/settings/activity_types" label="Activity Types" isNested />
-              <NavItem href="/settings/game_enrollments" label="Game Enrollments" isNested />
-              <NavItem href="/settings/game_enrollment_requests" label="Game Enrollment Requests" isNested />
+              <NavItem
+                href="/settings/activity_types"
+                label="Activity Types"
+                isNested
+              />
+              <NavItem
+                href="/settings/game_enrollments"
+                label="Game Enrollments"
+                isNested
+              />
+              <NavItem
+                href="/settings/game_enrollment_requests"
+                label="Game Enrollment Requests"
+                isNested
+              />
             </div>
           )}
 
-          <NavItem href="/campaigns" label="Campaigns" isNested icon={<IconCalculator className="h-3 w-3" />} />
+          <NavItem
+            href="/campaigns"
+            label="Campaigns"
+            isNested
+            icon={<IconCalculator className="h-3 w-3" />}
+          />
         </nav>
       </div>
 
