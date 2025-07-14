@@ -8,7 +8,7 @@ import requests
 from flask import Flask, Response, json, jsonify, request
 from flask_cors import CORS
 import pymysql.cursors
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, timezone
 from collections import defaultdict
 from typing import Optional, Dict, Any, List, Union
 import logging
@@ -2594,32 +2594,36 @@ def fetch_coupon_redeem_list():
     mobile = data.get('mobile', '')
     start_date = data.get('start_date', '')
     end_date = data.get('end_date', '')
+    school_code = data.get('school_code', '')
+    cluster = data.get('cluster', '')
+    block = data.get('block', '')
+    district = data.get('district', '')
     
-    # Base SQL query - note the aliasing for coupon title if needed.
+    # Updated SQL query to get school details from schools table
     sql = """
         SELECT 
             u.name AS 'Student Name', 
             ls.name AS 'School Name', 
             u.mobile_no AS 'Mobile Number', 
-            u.state, 
-            u.city, 
+            ls.state, 
+            ls.city, 
+            ls.cluster, 
+            ls.block, 
+            ls.district, 
             u.grade,
             lc.title as 'Coupon Title', 
             cr.coins AS 'Coins Redeemed', 
+            u.school_code AS 'School Code',
             cr.user_id, 
             cr.created_at AS 'Coupon Redeemed Date' 
         FROM lifeapp.coupon_redeems cr 
         INNER JOIN lifeapp.users u ON u.id = cr.user_id 
         INNER JOIN lifeapp.schools ls ON ls.id = u.school_id
         INNER JOIN lifeapp.coupons lc ON lc.id = cr.coupon_id
+        WHERE u.type = 3
     """
     filters = []
     params = []
-
-    # General search filter (if provided)
-    # if search:
-    #     filters.append("(u.name LIKE %s OR ls.name LIKE %s OR u.state LIKE %s OR u.city LIKE %s)")
-    #     params.extend([f"%{search}%", f"%{search}%", f"%{search}%", f"%{search}%"])
 
     if search:
         search_terms = search.strip().split()
@@ -2629,31 +2633,38 @@ def fetch_coupon_redeem_list():
                 name_conditions.append("u.name LIKE %s")
                 params.append(f"%{term}%")
             filters.append(f"({' AND '.join(name_conditions)})")
-    # Additional filters – add only if parameter exists so that NULL or empty values do not interfere.
+    
+    # Updated filters to use school fields
     if state:
-        filters.append("u.state = %s")
+        filters.append("ls.state = %s")
         params.append(state)
     if city:
-        filters.append("u.city = %s")
+        filters.append("ls.city = %s")
         params.append(city)
     if school:
         filters.append("ls.name = %s")
         params.append(school)
-
+    if school_code:
+        filters.append("u.school_code = %s")
+        params.append(school_code)
     if grade:
         filters.append("u.grade = %s")
         params.append(grade)
-        
-    # Add to existing filters
     if coupon_title:
         filters.append("lc.title = %s")
-        params.append(coupon_title)   
+        params.append(coupon_title)
+    if cluster:
+        filters.append("ls.cluster = %s")
+        params.append(cluster)
+    if block:
+        filters.append("ls.block = %s")
+        params.append(block)
+    if district:
+        filters.append("ls.district = %s")
+        params.append(district)
 
-    # Sanitize mobile number - remove all non-numeric characters
     sanitized_mobile = ''.join(filter(str.isdigit, mobile))
-
     if sanitized_mobile:
-        # Use exact match if full length (adjust 10 to your mobile number length)
         if len(sanitized_mobile) == 10:
             filters.append("u.mobile_no = %s")
             params.append(sanitized_mobile)
@@ -2661,11 +2672,9 @@ def fetch_coupon_redeem_list():
             filters.append("u.mobile_no LIKE %s")
             params.append(f"%{sanitized_mobile}%")
         
-    # Date validation
     if start_date and end_date and start_date > end_date:
         return jsonify({'error': 'Start date cannot be after end date'}), 400
 
-    # Add date filter
     if start_date and end_date:
         filters.append("cr.created_at BETWEEN %s AND %s")
         params.extend([start_date, end_date])
@@ -2676,9 +2685,8 @@ def fetch_coupon_redeem_list():
         filters.append("cr.created_at <= %s")
         params.append(end_date)
 
-    # If any filters are applied, append a WHERE clause.
     if filters:
-        sql += " WHERE " + " AND ".join(filters)
+        sql += " AND " + " AND ".join(filters)
         
     try:
         connection = get_db_connection()
@@ -2686,6 +2694,84 @@ def fetch_coupon_redeem_list():
             cursor.execute(sql, tuple(params))
             result = cursor.fetchall()
         return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
+@app.route('/api/student_school_codes', methods=['GET'])
+def student_school_codes():
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT DISTINCT school_code 
+                FROM lifeapp.users 
+                WHERE type = 3 
+                AND school_code IS NOT NULL 
+                AND school_code <> ''
+                ORDER BY school_code
+            """)
+            codes = [row['school_code'] for row in cursor.fetchall()]
+        return jsonify(codes)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
+# New endpoints for school filters
+@app.route('/api/school_clusters', methods=['GET'])
+def get_school_clusters():
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT DISTINCT cluster 
+                FROM lifeapp.schools 
+                WHERE cluster IS NOT NULL 
+                AND cluster <> ''
+                ORDER BY cluster
+            """)
+            clusters = [row['cluster'] for row in cursor.fetchall()]
+        return jsonify(clusters)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
+@app.route('/api/school_blocks', methods=['GET'])
+def get_school_blocks():
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT DISTINCT block 
+                FROM lifeapp.schools 
+                WHERE block IS NOT NULL 
+                AND block <> ''
+                ORDER BY block
+            """)
+            blocks = [row['block'] for row in cursor.fetchall()]
+        return jsonify(blocks)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
+@app.route('/api/school_districts', methods=['GET'])
+def get_school_districts():
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT DISTINCT district 
+                FROM lifeapp.schools 
+                WHERE district IS NOT NULL 
+                AND district <> ''
+                ORDER BY district
+            """)
+            districts = [row['district'] for row in cursor.fetchall()]
+        return jsonify(districts)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
@@ -4105,6 +4191,162 @@ def vision_teacher_completion_rate():
 
     finally:
         conn.close()
+
+###################################################################################
+###################################################################################
+######################## TEACHER / COUPON REDEEMED APIs ###########################
+###################################################################################
+###################################################################################
+
+
+#--- Already implemented in coupon_redeem_search for student section ---
+
+# @app.route('/api/coupon_titles', methods=['GET'])
+# def get_coupon_titles():
+#     try:
+#         connection = get_db_connection()
+#         with connection.cursor() as cursor:
+#             cursor.execute("SELECT DISTINCT title FROM lifeapp.coupons ORDER BY title")
+#             result = cursor.fetchall()
+#             titles = [item['title'] for item in result]
+#         return jsonify(titles)
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
+#     finally:
+#         connection.close()
+
+@app.route('/api/teacher_coupon_redeem_search', methods=['POST'])
+def fetch_teacher_coupon_redeem_list():
+    data = request.get_json() or {}
+    search = data.get('search', '')
+    state = data.get('state', '')
+    city = data.get('city', '')
+    school = data.get('school', '')
+    coupon_title = data.get('coupon_title', '')
+    mobile = data.get('mobile', '')
+    start_date = data.get('start_date', '')
+    end_date = data.get('end_date', '')
+    school_code = data.get('school_code', '')
+    cluster = data.get('cluster', '')
+    block = data.get('block', '')
+    district = data.get('district', '')
+    
+    sql = """
+        SELECT 
+            u.name AS 'Teacher Name', 
+            ls.name AS 'School Name', 
+            u.mobile_no AS 'Mobile Number', 
+            ls.state, 
+            ls.city,
+            ls.cluster,
+            ls.block,
+            ls.district,
+            u.school_code AS 'School Code',
+            lc.title as 'Coupon Title', 
+            cr.coins AS 'Coins Redeemed', 
+            cr.user_id, 
+            cr.created_at AS 'Coupon Redeemed Date' 
+        FROM lifeapp.coupon_redeems cr 
+        INNER JOIN lifeapp.users u ON u.id = cr.user_id 
+        INNER JOIN lifeapp.schools ls ON ls.id = u.school_id
+        INNER JOIN lifeapp.coupons lc ON lc.id = cr.coupon_id
+        WHERE u.type = 5  # Filter for teachers
+    """
+    filters = []
+    params = []
+
+    if search:
+        search_terms = search.strip().split()
+        if search_terms:
+            name_conditions = []
+            for term in search_terms:
+                name_conditions.append("u.name LIKE %s")
+                params.append(f"%{term}%")
+            filters.append(f"({' AND '.join(name_conditions)})")
+    
+    # Updated to use school fields
+    if state:
+        filters.append("ls.state = %s")
+        params.append(state)
+    if city:
+        filters.append("ls.city = %s")
+        params.append(city)
+    if school:
+        filters.append("ls.name = %s")
+        params.append(school)
+    if coupon_title:
+        filters.append("lc.title = %s")
+        params.append(coupon_title)
+    if school_code:
+        filters.append("u.school_code = %s")
+        params.append(school_code)
+    if cluster:
+        filters.append("ls.cluster = %s")
+        params.append(cluster)
+    if block:
+        filters.append("ls.block = %s")
+        params.append(block)
+    if district:
+        filters.append("ls.district = %s")
+        params.append(district)
+
+    sanitized_mobile = ''.join(filter(str.isdigit, mobile))
+    if sanitized_mobile:
+        if len(sanitized_mobile) == 10:
+            filters.append("u.mobile_no = %s")
+            params.append(sanitized_mobile)
+        else:
+            filters.append("u.mobile_no LIKE %s")
+            params.append(f"%{sanitized_mobile}%")
+            
+    if start_date and end_date and start_date > end_date:
+        return jsonify({'error': 'Start date cannot be after end date'}), 400
+
+    if start_date and end_date:
+        filters.append("cr.created_at BETWEEN %s AND %s")
+        params.extend([start_date, end_date])
+    elif start_date:
+        filters.append("cr.created_at >= %s")
+        params.append(start_date)
+    elif end_date:
+        filters.append("cr.created_at <= %s")
+        params.append(end_date)
+
+    if filters:
+        sql += " AND " + " AND ".join(filters)
+        
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute(sql, tuple(params))
+            result = cursor.fetchall()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
+
+
+@app.route('/api/teacher_school_codes', methods=['GET'])
+def teacher_school_codes():
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT DISTINCT school_code 
+                FROM lifeapp.users 
+                WHERE type = 5 
+                AND school_code IS NOT NULL 
+                AND school_code <> ''
+                ORDER BY school_code
+            """)
+            codes = [row['school_code'] for row in cursor.fetchall()]
+        return jsonify(codes)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
 
 ###################################################################################
 ###################################################################################
@@ -9231,30 +9473,35 @@ def get_coupons():
         with conn.cursor() as cursor:
             start_date = request.args.get('start_date')
             end_date = request.args.get('end_date')
+            type_filter = request.args.get('type')  # 1=student, 2=teacher
             
             base_query = '''
             SELECT 
                 c.id, c.title, c.category_id, 
                 c.coin, c.link, c.details, 
-                c.index, c.coupon_media_id as media_id, c.created_at, c.updated_at,
+                c.index, c.coupon_media_id as media_id, 
+                c.created_at, c.updated_at, c.type, c.status,
                 m.path as media_path
             FROM lifeapp.coupons c
-                left join lifeapp.media m on c.coupon_media_id = m.id
+                LEFT JOIN lifeapp.media m ON c.coupon_media_id = m.id
             '''
             conditions = []
             params = []
             
-            # Check and apply the start_date filter if provided
+            # Date filters
             if start_date:
                 conditions.append('c.created_at >= %s')
                 params.append(start_date)
-            
-            # Check and apply the end_date filter if provided
             if end_date:
                 conditions.append('c.created_at <= %s')
                 params.append(end_date)
+                
+            # Type filter - FIXED: Properly handle type filter
+            if type_filter and type_filter in ('1', '2'):
+                conditions.append('c.type = %s')
+                params.append(int(type_filter))  # Convert to integer
             
-            # Append the conditions if there are any filters
+            # Build final query
             if conditions:
                 base_query += ' WHERE ' + ' AND '.join(conditions)
             
@@ -9262,43 +9509,52 @@ def get_coupons():
             coupons = cursor.fetchall()
             base_url = os.getenv('BASE_URL')
             for r in coupons:
-                r['media_url'] = f"{base_url}/{r['media_path']}" if r.get('media_path') else None
+                if r.get('media_path'):
+                    r['media_url'] = f"{base_url}/{r['media_path']}"
+                else:
+                    r['media_url'] = None
         
             return jsonify({'count': len(coupons), 'data': coupons})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
 
-# POST add coupon
+# POST add coupon -
 @app.route('/api/coupons', methods=['POST'])
 def add_coupon():
-    # We're expecting multipart/form-data
     form = request.form
     file = request.files.get('media')
     media_id = None
 
-    # 1) upload the file if provided
     if file and file.filename:
-        media = upload_media(file)       # your existing helper
+        media = upload_media(file)
         media_id = media['id']
 
-    # 2) pull other fields
-    title        = form.get('title')
-    category_id  = form.get('category_id')
-    coin         = form.get('coin')
-    link         = form.get('link')
-    details      = form.get('details')
-    idx          = form.get('index')
+    # Extract all fields - 
+    try:
+        title = form.get('title')
+        category_id = int(form.get('category_id')) if form.get('category_id') else None
+        coin = form.get('coin')
+        link = form.get('link')
+        details = form.get('details')
+        idx = int(form.get('index')) if form.get('index') else 0
+        coupon_type = int(form.get('type', 1))  # Default to student
+        status = int(form.get('status', 1))     # Default to active
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': f'Invalid parameter: {str(e)}'}), 400
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
-              """
-              INSERT INTO lifeapp.coupons
-                (title, category_id, coin, link, details, `index`, coupon_media_id, created_at, updated_at)
-              VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-              """,
-              (title, category_id, coin, link, details, idx, media_id)
+                """
+                INSERT INTO lifeapp.coupons
+                    (title, category_id, coin, link, details, `index`, 
+                    coupon_media_id, created_at, updated_at, type, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), %s, %s)
+                """,
+                (title, category_id, coin, link, details, idx, media_id, coupon_type, status)
             )
             conn.commit()
             return jsonify({'success': True}), 201
@@ -9308,58 +9564,61 @@ def add_coupon():
     finally:
         conn.close()
 
-# PUT update coupon
+# PUT update coupon -
 @app.route('/api/coupons/<int:id>', methods=['PUT'])
 def update_coupon(id):
     form = request.form
     file = request.files.get('media')
     new_media_id = None
 
-    # if a new file is uploaded, store it & plan to delete old
     if file and file.filename:
         media = upload_media(file)
         new_media_id = media['id']
 
-    # pull other fields
-    title       = form.get('title')
-    category_id = form.get('category_id')
-    coin        = form.get('coin')
-    link        = form.get('link')
-    details     = form.get('details')
-    idx         = form.get('index')
+    # Extract all fields - 
+    try:
+        title = form.get('title')
+        category_id = int(form.get('category_id')) if form.get('category_id') else None
+        coin = form.get('coin')
+        link = form.get('link')
+        details = form.get('details')
+        idx = int(form.get('index')) if form.get('index') else 0
+        coupon_type = int(form.get('type', 1))  # Default to student
+        status = int(form.get('status', 1))     # Default to active
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': f'Invalid parameter: {str(e)}'}), 400
 
     conn = get_db_connection()
     try:
-        # if replacing media, fetch old key so we can delete from S3/db
+        # Handle media replacement
         if new_media_id is not None:
             with conn.cursor(pymysql.cursors.DictCursor) as cur:
                 cur.execute("SELECT coupon_media_id, m.path AS media_path FROM coupons c LEFT JOIN media m ON c.coupon_media_id=m.id WHERE c.id=%s", (id,))
                 old = cur.fetchone()
-            # delete old media row + S3
             if old and old['coupon_media_id']:
                 with conn.cursor() as cur:
                     cur.execute("DELETE FROM media WHERE id=%s", (old['coupon_media_id'],))
                 delete_s3_object(old['media_path'])
 
-        # build update
+        # Build update query
         if new_media_id is not None:
             sql = """
-              UPDATE lifeapp.coupons
+                UPDATE lifeapp.coupons
                 SET title=%s, category_id=%s, coin=%s, link=%s,
                     details=%s, `index`=%s, coupon_media_id=%s,
-                    updated_at=NOW()
-              WHERE id=%s
+                    updated_at=NOW(), type=%s, status=%s
+                WHERE id=%s
             """
-            params = (title, category_id, coin, link, details, idx, new_media_id, id)
+            params = (title, category_id, coin, link, details, idx, new_media_id, coupon_type, status, id)
         else:
             sql = """
-              UPDATE lifeapp.coupons
+                UPDATE lifeapp.coupons
                 SET title=%s, category_id=%s, coin=%s, link=%s,
-                    details=%s, `index`=%s,
-                    updated_at=NOW()
-              WHERE id=%s
+                    details=%s, `index`=%s, 
+                    updated_at=NOW(), type=%s, status=%s
+                WHERE id=%s
             """
-            params = (title, category_id, coin, link, details, idx, id)
+            params = (title, category_id, coin, link, details, idx, coupon_type, status, id)
 
         with conn.cursor() as cur:
             cur.execute(sql, params)
@@ -9371,26 +9630,23 @@ def update_coupon(id):
     finally:
         conn.close()
 
-# DELETE coupon
+# DELETE coupon 
 @app.route('/api/coupons/<int:id>', methods=['DELETE'])
 def delete_coupon(id):
     conn = get_db_connection()
     try:
-        # fetch the media id + path
         with conn.cursor(pymysql.cursors.DictCursor) as cur:
             cur.execute("""
-              SELECT coupon_media_id, m.path AS media_path
+                SELECT coupon_media_id, m.path AS media_path
                 FROM lifeapp.coupons c
                 LEFT JOIN media m ON c.coupon_media_id=m.id
-               WHERE c.id=%s
+                WHERE c.id=%s
             """, (id,))
             row = cur.fetchone()
 
-        # delete the coupon row
         with conn.cursor() as cur:
             cur.execute("DELETE FROM lifeapp.coupons WHERE id=%s", (id,))
 
-        # delete media record + S3 object if exists
         if row and row['coupon_media_id']:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM media WHERE id=%s", (row['coupon_media_id'],))
@@ -9403,8 +9659,6 @@ def delete_coupon(id):
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
-
-
 
 ###################################################################################
 ###################################################################################
@@ -9740,7 +9994,7 @@ def quiz_list():
 @app.route('/api/campaigns/<int:id>/details', methods=['GET'])
 def get_campaign_details(id):
     """Fetch statistics for a specific campaign"""
-    school_code = request.args.get('school_code')  # Get school_code from query string
+    school_code = request.args.get('school_code')
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
@@ -9805,29 +10059,12 @@ def handle_vision_details(conn, cursor, vision_id, start_date, campaign, school_
     cursor.execute(distinct_user_query, tuple(params))
     user_rows = cursor.fetchall()
     
-    # DEBUG: Log the query and results
-    print(f"Vision stats query: {distinct_user_query}")
-    print(f"Query params: {params}")
-    print(f"User rows: {user_rows}")
-    print(f"Number of participants: {len(user_rows)}")
-    
-    # FIX: Properly handle empty user list
-    if not user_rows:
-        # Return zero stats if no participants found
-        return {
-            'total_submission': 0,
-            'total_approved': 0,
-            'total_rejected': 0,
-            'total_requested': 0,
-            'total_coins_earned': 0
-        }
-    
     # Extract user IDs from the result
-    user_ids = [row['user_id'] for row in user_rows]
+    user_ids = [row['user_id'] for row in user_rows] if user_rows else []
 
-    # FIX: Use proper placeholder syntax for IN clause with variable length
+    # Get all answers for filtered users
+    answer_rows = []
     if user_ids:
-        # Get all answers for filtered users
         placeholders = ','.join(['%s'] * len(user_ids))
         answer_query = f"""
             SELECT user_id, status, score 
@@ -9838,8 +10075,6 @@ def handle_vision_details(conn, cursor, vision_id, start_date, campaign, school_
         """
         cursor.execute(answer_query, [vision_id] + user_ids)
         answer_rows = cursor.fetchall()
-    else:
-        answer_rows = []
 
     # Process results
     user_status = {}
@@ -9856,7 +10091,6 @@ def handle_vision_details(conn, cursor, vision_id, start_date, campaign, school_
         if user_id not in user_status:
             user_status[user_id] = status
         else:
-            # Update status based on the most restrictive condition
             if status == 'rejected' or user_status[user_id] == 'rejected':
                 user_status[user_id] = 'rejected'
             elif (status == 'requested' or status is None) and user_status[user_id] != 'rejected':
@@ -9877,6 +10111,7 @@ def handle_vision_details(conn, cursor, vision_id, start_date, campaign, school_
         'total_requested': total_requested,
         'total_coins_earned': total_coins_earned
     }
+
 def handle_mission_details(conn, cursor, mission_id, start_date, school_code=None):
     """Calculate statistics for Mission campaigns with school code filter"""
     start_datetime = datetime.combine(start_date, time.min)
