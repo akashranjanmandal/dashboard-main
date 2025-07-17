@@ -2147,7 +2147,6 @@ def search():
     school = filters.get('school')
     city = filters.get('city')
     grade = filters.get('grade')
-    mission_type = filters.get('mission_type')
     mission_acceptance = filters.get('mission_acceptance')
     requested_count = filters.get('mission_requested_no')
     accepted_count = filters.get('mission_accepted_no')
@@ -2221,22 +2220,21 @@ def search():
         sql += " AND u.grade = %s"
         params.append(grade)
     
-
-    # Mission acceptance filter (updated with COALESCE)
+    # Mission acceptance filter
     if mission_acceptance:
         if mission_acceptance == 'accepted':
             sql += " AND COALESCE(ums.total_missions_accepted, 0) > 0 "
         else:
             sql += " AND COALESCE(ums.total_missions_accepted, 0) = 0 "
     
-    # Vision acceptance filter (updated with COALESCE)
+    # Vision acceptance filter
     if vision_acceptance:
         if vision_acceptance == 'accepted':
             sql += " AND COALESCE(vs.total_visions_accepted, 0) > 0 "
         else:
             sql += " AND COALESCE(vs.total_visions_accepted, 0) = 0 "
     
-    # Mission count filters (updated with COALESCE)
+    # Mission count filters
     if requested_count:
         sql += " AND COALESCE(ums.total_missions_requested, 0) = %s"
         params.append(int(requested_count))
@@ -2244,7 +2242,7 @@ def search():
         sql += " AND COALESCE(ums.total_missions_accepted, 0) = %s"
         params.append(int(accepted_count))
         
-    # Vision count filters (updated with COALESCE)
+    # Vision count filters
     if vision_requested_no:
         sql += " AND COALESCE(vs.total_visions_requested, 0) = %s"
         params.append(int(vision_requested_no))
@@ -2252,20 +2250,25 @@ def search():
         sql += " AND COALESCE(vs.total_visions_accepted, 0) = %s"
         params.append(int(vision_accepted_no))
         
+    # coin ranges
     if earn_coins:
-        if earn_coins == "0-100":
-            sql += " AND u.earn_coins BETWEEN 0 AND 100"
-        elif earn_coins == "101-500":
-            sql += " AND u.earn_coins BETWEEN 101 AND 500"
-        elif earn_coins == "501-1000":
-            sql += " AND u.earn_coins BETWEEN 501 AND 1000"
-        elif earn_coins == "1000+":
-            sql += " AND u.earn_coins > 1000"
+        if earn_coins == "0-1000":
+            sql += " AND u.earn_coins BETWEEN 0 AND 1000"
+        elif earn_coins == "1001-5000":
+            sql += " AND u.earn_coins BETWEEN 1001 AND 5000"
+        elif earn_coins == "5001-10000":
+            sql += " AND u.earn_coins BETWEEN 5001 AND 10000"
+        elif earn_coins == "10000+":
+            sql += " AND u.earn_coins > 10000"
 
+    # school code handling
     if schoolCodes and isinstance(schoolCodes, list) and len(schoolCodes) > 0:
-        placeholders = ",".join(["%s"] * len(schoolCodes))
-        sql += f" AND u.school_code IN ({placeholders})"
-        params.extend([code for code in schoolCodes if code])
+        if len(schoolCodes) == 1:
+            sql += " AND u.school_code = %s"
+            params.append(schoolCodes[0])
+        else:
+            sql += " AND u.school_code IN %s"
+            params.append(tuple(schoolCodes))
         
     if mobile_no:
         sql += " AND u.mobile_no = %s"
@@ -2291,6 +2294,7 @@ def search():
         return jsonify({'error': str(e)}), 500
     finally:
         connection.close()
+
 @app.route('/api/add_student', methods=['POST'])
 def add_student():
     data = request.get_json() or {}
