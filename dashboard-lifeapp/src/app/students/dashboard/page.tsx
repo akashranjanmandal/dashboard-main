@@ -5270,10 +5270,10 @@ export default function StudentDashboard() {
                       onChange={(e) => setSelectedEarnCoins(e.target.value)}
                     >
                       <option value="">Select Earn Coins</option>
-                      <option value="0-100">0-100 Coins</option>
-                      <option value="101-500">101-500 Coins</option>
-                      <option value="501-1000">501-1000 Coins</option>
-                      <option value="1000+">1000+ Coins</option>
+                      <option value="0-1000">0-1000 Coins</option>
+                      <option value="1001-5000">1001-5000 Coins</option>
+                      <option value="5001-10000">5001-10000 Coins</option>
+                      <option value="10000+">10000+ Coins</option>
                     </select>
                   </div>
 
@@ -5336,11 +5336,11 @@ export default function StudentDashboard() {
                       className="form-control"
                     />
                   </div>
-                  <div className="col-12 col-md-6 col-lg-4">
+                  <div className="col-16 col-md-6 col-lg-4">
                     <div className="border rounded p-2 bg-white">
                       <input
                         type="text"
-                        placeholder="Search With School code (comma separated)"
+                        placeholder="Search School code (press enter or comma before search)"
                         className="form-control border-0 p-0"
                         value={inputCode}
                         onChange={(e) => setInputCode(e.target.value)}
