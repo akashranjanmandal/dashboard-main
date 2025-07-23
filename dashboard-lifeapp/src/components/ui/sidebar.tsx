@@ -2,11 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import {
-  Home,
-  ChevronDown,
-  Terminal,
-} from "lucide-react";
+import { Home, ChevronDown, Terminal } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   IconBackpack,
@@ -69,7 +65,7 @@ const NavItem = ({
         className={cn(
           "flex items-center gap-2 px-3 py-2 text-sm transition-colors no-underline",
           isNested ? "pl-11" : "pl-3",
-          (isActive || hasActiveChild)
+          isActive || hasActiveChild
             ? "bg-gray-800 text-white font-medium"
             : "text-gray-300 hover:bg-gray-800/50 hover:text-white"
         )}
@@ -375,6 +371,7 @@ export function Sidebar() {
               <NavItem href="/settings/sections" label="Sections" isNested />
               <NavItem href="/settings/boards" label="Boards" isNested />
               <NavItem href="/settings/topics" label="Topics" isNested />
+              <NavItem href="/settings/category" label="Category" isNested />
               <NavItem href="/settings/coupons" label="Coupons" isNested />
               <NavItem
                 href="/settings/activity_types"
@@ -415,4 +412,3 @@ export function Sidebar() {
     </div>
   );
 }
- 
