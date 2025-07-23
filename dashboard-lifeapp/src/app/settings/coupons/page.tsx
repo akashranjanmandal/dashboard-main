@@ -26,6 +26,7 @@ interface Coupon {
   id: number;
   title: string;
   category_id: number;
+  category_title: string;
   coin: string;
   link: string;
   details: string;
@@ -39,8 +40,14 @@ interface Coupon {
   status: number; // 1: available, 0: inactive
 }
 
+interface Category {
+  id: number;
+  title: string;
+}
+
 export default function SettingsCoupons() {
   const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
@@ -53,6 +60,7 @@ export default function SettingsCoupons() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<number | null>(null); // null = all, 1=student, 2=teacher
+  const [statusFilter, setStatusFilter] = useState<number | null>(null); // null = all, 1=active, 0=inactive
 
   // Form states
   const [formData, setFormData] = useState<{
@@ -79,12 +87,23 @@ export default function SettingsCoupons() {
 
   useEffect(() => {
     fetchCoupons();
-  }, [startDate, endDate, typeFilter]);
+    fetchCategories();
+  }, [startDate, endDate, typeFilter, statusFilter]);
 
   const [loading, setLoading] = useState(false);
   const [isAddLoading, setIsAddLoading] = useState(false);
   const [isEditLoading, setIsEditLoading] = useState(false);
   const [isDeleteLoading, setIsDeleteLoading] = useState(false);
+
+  const fetchCategories = async () => {
+    try {
+      const response = await fetch(`${api_startpoint}/api/categories`);
+      const data = await response.json();
+      setCategories(data);
+    } catch (error) {
+      console.error("Error fetching categories:", error);
+    }
+  };
 
   const fetchCoupons = async () => {
     setLoading(true);
@@ -93,9 +112,14 @@ export default function SettingsCoupons() {
       if (startDate) params.append("start_date", startDate);
       if (endDate) params.append("end_date", endDate);
       if (typeFilter !== null) params.append("type", typeFilter.toString());
+      if (statusFilter !== null)
+        params.append("status", statusFilter.toString());
 
       const response = await fetch(`${api_startpoint}/api/coupons?${params}`);
       const data = await response.json();
+
+      console.log("Coupons data:", data.data);
+
       setCoupons(data.data);
       setTotalCount(data.count);
     } catch (error) {
@@ -109,11 +133,12 @@ export default function SettingsCoupons() {
     setStartDate("");
     setEndDate("");
     setTypeFilter(null);
+    setStatusFilter(null);
   };
 
   useEffect(() => {
     fetchCoupons();
-  }, [currentPage, itemsPerPage, startDate, endDate, typeFilter]);
+  }, [currentPage, itemsPerPage, startDate, endDate, typeFilter, statusFilter]);
 
   const openEditModal = (coupon: Coupon) => {
     setSelectedCoupon(coupon);
@@ -299,6 +324,24 @@ export default function SettingsCoupons() {
                       <option value="2">Teacher Coupons</option>
                     </select>
 
+                    {/* Status Filter Dropdown */}
+                    <select
+                      className="form-select"
+                      value={
+                        statusFilter === null ? "all" : statusFilter.toString()
+                      }
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setStatusFilter(
+                          value === "all" ? null : parseInt(value)
+                        );
+                      }}
+                    >
+                      <option value="all">All Status</option>
+                      <option value="1">Active</option>
+                      <option value="0">Inactive</option>
+                    </select>
+
                     <input
                       type="date"
                       className="form-control"
@@ -316,7 +359,10 @@ export default function SettingsCoupons() {
                       onClick={fetchCoupons}
                       disabled={
                         loading ||
-                        (!startDate && !endDate && typeFilter === null)
+                        (!startDate &&
+                          !endDate &&
+                          typeFilter === null &&
+                          statusFilter === null)
                       }
                     >
                       {loading ? (
@@ -379,7 +425,7 @@ export default function SettingsCoupons() {
                         <th>Type</th>
                         <th>Status</th>
                         <th>Link</th>
-                        <th>Category ID</th>
+                        <th>Category</th>
                         <th>Coin</th>
                         <th>Created At</th>
                         <th>Actions</th>
@@ -414,7 +460,7 @@ export default function SettingsCoupons() {
                           <td>{getTypeText(coupon.type)}</td>
                           <td>{getStatusText(coupon.status)}</td>
                           <td>{coupon.link}</td>
-                          <td>{coupon.category_id}</td>
+                          <td>{coupon.category_title}</td>
                           <td>{coupon.coin}</td>
                           <td>{formatDateTime(coupon.created_at)}</td>
                           <td>
@@ -481,10 +527,9 @@ export default function SettingsCoupons() {
                         </div>
 
                         <div className="col-md-6">
-                          <label className="form-label">Category ID</label>
-                          <input
-                            type="number"
-                            className="form-control"
+                          <label className="form-label">Category</label>
+                          <select
+                            className="form-select"
                             value={formData.category_id}
                             onChange={(e) =>
                               setFormData({
@@ -493,7 +538,14 @@ export default function SettingsCoupons() {
                               })
                             }
                             required
-                          />
+                          >
+                            <option value="">Select Category</option>
+                            {categories.map((category) => (
+                              <option key={category.id} value={category.id}>
+                                {category.title}
+                              </option>
+                            ))}
+                          </select>
                         </div>
 
                         <div className="col-md-6">
@@ -537,7 +589,6 @@ export default function SettingsCoupons() {
                           />
                         </div>
 
-                        {/* New Fields */}
                         <div className="col-md-6">
                           <label className="form-label">Status</label>
                           <select
@@ -662,10 +713,9 @@ export default function SettingsCoupons() {
                         </div>
 
                         <div className="col-md-6">
-                          <label className="form-label">Category ID</label>
-                          <input
-                            type="number"
-                            className="form-control"
+                          <label className="form-label">Category</label>
+                          <select
+                            className="form-select"
                             value={formData.category_id}
                             onChange={(e) =>
                               setFormData({
@@ -674,7 +724,20 @@ export default function SettingsCoupons() {
                               })
                             }
                             required
-                          />
+                          >
+                            <option value="">Select Category</option>
+                            {categories.map((category) => (
+                              <option
+                                key={category.id}
+                                value={category.id}
+                                selected={
+                                  selectedCoupon?.category_id === category.id
+                                }
+                              >
+                                {category.title}
+                              </option>
+                            ))}
+                          </select>
                         </div>
 
                         <div className="col-md-6">
@@ -718,7 +781,6 @@ export default function SettingsCoupons() {
                           />
                         </div>
 
-                        {/* New Fields */}
                         <div className="col-md-6">
                           <label className="form-label">Status</label>
                           <select
