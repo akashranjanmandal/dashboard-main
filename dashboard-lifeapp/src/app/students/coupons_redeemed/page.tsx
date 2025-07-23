@@ -271,12 +271,10 @@ export default function CouponsRedeemed() {
       setIsStatesLoading(true);
       try {
         const res = await fetch(`${api_startpoint}/api/state_list_schools`);
-        const data: { state: string }[] = await res.json();
+        const data = await res.json();
 
         if (Array.isArray(data)) {
-          const stateList = data
-            .map((item) => (item.state ? item.state.trim() : ""))
-            .filter((state) => state !== "");
+          const stateList = data.filter((state) => state);
           setStates(stateList);
           sessionStorage.setItem("stateList", JSON.stringify(stateList));
         }
@@ -293,8 +291,6 @@ export default function CouponsRedeemed() {
 
   // Fetch cities
   const fetchCities = async (state: string) => {
-    if (!state) return;
-
     setIsCitiesLoading(true);
     try {
       const res = await fetch(`${api_startpoint}/api/city_list_schools`, {
@@ -305,23 +301,7 @@ export default function CouponsRedeemed() {
 
       if (!res.ok) throw new Error(`HTTP error! Status: ${res.status}`);
       const data = await res.json();
-
-      if (Array.isArray(data) && data.length > 0) {
-        const cityList: string[] = data
-          .map((city) =>
-            typeof city === "string"
-              ? city.trim()
-              : city.city
-              ? city.city.trim()
-              : ""
-          )
-          .filter((city) => city !== "");
-        setCities(cityList);
-        sessionStorage.setItem(`cityList_${state}`, JSON.stringify(cityList));
-      } else {
-        console.warn("⚠ No cities found for state:", state);
-        setCities([]);
-      }
+      setCities(data || []);
     } catch (error) {
       console.error("❌ Error fetching city list:", error);
       setCities([]);
@@ -331,15 +311,14 @@ export default function CouponsRedeemed() {
   };
 
   useEffect(() => {
-    if (selectedState) {
-      setCities([]);
-      setSelectedCity("");
-      fetchCities(selectedState);
-    } else {
-      setCities([]);
-      setSelectedCity("");
-    }
+    setSelectedCity("");
+    fetchCities(selectedState);
   }, [selectedState]);
+
+  // Initial city load
+  useEffect(() => {
+    fetchCities("");
+  }, []);
 
   // Fetch schools
   useEffect(() => {
