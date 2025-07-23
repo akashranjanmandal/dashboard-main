@@ -4,6 +4,7 @@ from binascii import Error
 import csv
 import io
 import math
+import traceback
 import requests 
 from flask import Flask, Response, json, jsonify, request
 from flask_cors import CORS
@@ -2060,6 +2061,7 @@ def vision_teacher_completions_summary():
 ######################## STUDENT/ DASHBOARD APIs ##################################
 ###################################################################################
 ###################################################################################
+
 @app.route('/api/state_list', methods=['GET'])
 def get_state_list():
     connection = get_db_connection()
@@ -2723,6 +2725,54 @@ def student_school_codes():
     finally:
         connection.close()
 
+# State list endpoint
+@app.route('/api/state_list_schools', methods=['GET'])
+def get_state_list_schools():
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            sql = """
+                SELECT DISTINCT state 
+                FROM lifeapp.schools 
+                WHERE state IS NOT NULL AND state != ''
+                ORDER BY state
+            """
+            cursor.execute(sql)
+            result = cursor.fetchall()
+            states = [row['state'] for row in result]
+        return jsonify(states)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        connection.close()
+
+# City list endpoint with state filter
+@app.route('/api/city_list_schools', methods=['POST'])
+def get_city_list_schools():
+    data = request.json or {}
+    state = data.get('state', '')
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            sql = """
+                SELECT DISTINCT city 
+                FROM lifeapp.schools
+                WHERE city IS NOT NULL AND city != ''
+            """
+            params = []
+            if state:
+                sql += " AND state = %s"
+                params.append(state)
+            sql += " ORDER BY city"
+            cursor.execute(sql, params)
+            result = cursor.fetchall()
+            cities = [row['city'] for row in result]
+        return jsonify(cities)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+               
 # New endpoints for school filters
 @app.route('/api/school_clusters', methods=['GET'])
 def get_school_clusters():
@@ -2938,10 +2988,10 @@ def update_mission_status():
     student_id = data.get('student_id')
     action = data.get('action')
 
-    print(f" Received mission status update: row_id={row_id}, mission_id={mission_id}, student_id={student_id}, action={action}")
+    print(f"Received mission status update: row_id={row_id}, mission_id={mission_id}, student_id={student_id}, action={action}")
 
     if not all([row_id, student_id, action]):
-        print(" Missing parameters")
+        print("Missing parameters")
         return jsonify({'error': 'Missing parameters'}), 400
 
     conn = get_db_connection()
@@ -2950,15 +3000,15 @@ def update_mission_status():
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             if action == 'approve':
-                # 1 mark approved
-                print(" Marking mission as approved...")
+                # ✅ 1. Mark approved
+                print("Marking mission as approved...")
                 cursor.execute("""
                     UPDATE la_mission_completes
                     SET approved_at = %s, rejected_at = NULL
                     WHERE id = %s AND user_id = %s
                 """, (now, row_id, student_id))
 
-                # 2️fetch mission details
+                # ✅ 2. Fetch mission details
                 cursor.execute("""
                     SELECT
                         lm.la_level_id,
@@ -2983,11 +3033,11 @@ def update_mission_status():
                     else:
                         mission_points = 0
 
-                    print(f" Mission points resolved: {mission_points} for mission_type {mission_type}")
+                    print(f"Mission points resolved: {mission_points} for mission_type {mission_type}")
 
                     if mission_points and mission_points > 0:
-                        # insert coin transaction
-                        print(" Inserting coin transaction...")
+                        # ✅ 3. Student coin transaction
+                        print("Inserting student coin transaction...")
                         cursor.execute("""
                             INSERT INTO coin_transactions
                                 (user_id, type, amount, coinable_type, coinable_id, created_at, updated_at)
@@ -3003,8 +3053,8 @@ def update_mission_status():
                             now
                         ))
 
-                        # update user coins
-                        print(" Updating user earn_coins...")
+                        # ✅ 4. Update student earn_coins
+                        print("Updating student earn_coins...")
                         cursor.execute("""
                             UPDATE users
                             SET earn_coins = earn_coins + %s,
@@ -3012,17 +3062,70 @@ def update_mission_status():
                             WHERE id = %s
                         """, (mission_points, now, student_id))
 
-                        #  store points in la_mission_completes
-                        print("  Updating la_mission_completes.points...")
+                        # ✅ 5. Update points in la_mission_completes
+                        print("Updating la_mission_completes.points...")
                         cursor.execute("""
                             UPDATE la_mission_completes
                             SET points = %s, updated_at = %s
                             WHERE id = %s AND user_id = %s
                         """, (mission_points, now, row_id, student_id))
+
+                        # ✅ 6. Fetch teacher who assigned this mission
+                        cursor.execute("""
+                            SELECT teacher_id
+                            FROM la_mission_assigns
+                            WHERE la_mission_id = %s AND user_id = %s
+                            LIMIT 1
+                        """, (mission_id, student_id))
+                        teacher_row = cursor.fetchone()
+
+                        if teacher_row:
+                            teacher_id = teacher_row["teacher_id"]
+
+                            # ✅ 7. Get teacher reward points
+                            cursor.execute("""
+                                SELECT teacher_correct_submission_points
+                                FROM la_levels
+                                WHERE id = %s
+                            """, (result["la_level_id"],))
+                            teacher_reward_row = cursor.fetchone()
+
+                            teacher_points = teacher_reward_row["teacher_correct_submission_points"] if teacher_reward_row else 0
+
+                            if teacher_points and teacher_points > 0:
+                                print(f"Rewarding teacher {teacher_id} with {teacher_points} points")
+
+                                # ✅ 8. Insert teacher transaction
+                                cursor.execute("""
+                                    INSERT INTO coin_transactions
+                                        (user_id, type, amount, coinable_type, coinable_id, created_at, updated_at)
+                                    VALUES
+                                        (%s, %s, %s, %s, %s, %s, %s)
+                                """, (
+                                    teacher_id,
+                                    9,
+                                    teacher_points,
+                                    'App\\Models\\LaMission',
+                                    row_id,
+                                    now,
+                                    now
+                                ))
+
+                                # ✅ 9. Update teacher earn_coins
+                                cursor.execute("""
+                                    UPDATE users
+                                    SET earn_coins = earn_coins + %s,
+                                        updated_at = %s
+                                    WHERE id = %s
+                                """, (teacher_points, now, teacher_id))
+                            else:
+                                print("⚠ No teacher reward points set for this level")
+                        else:
+                            print("⚠ No assigning teacher found")
                     else:
-                        print("⚠  mission_points evaluated as 0 — skipping coin transaction.")
+                        print("⚠ mission_points = 0 — skipping coin reward")
                 else:
-                    print(" Could not fetch mission details.")
+                    print("⚠ Could not fetch mission details")
 
             elif action == 'reject':
                 print("Marking mission as rejected...")
@@ -3045,8 +3148,7 @@ def update_mission_status():
     finally:
         conn.close()
         print("🔚 Connection closed")
-
-
+        
 ###################################################################################
 ###################################################################################
 ######################## STUDENT/ VISION APIs ####################################
@@ -3156,14 +3258,20 @@ def fetch_vision_sessions():
     finally:
         conn.close()
 
+
 @app.route('/api/vision_sessions/<int:answer_id>/score', methods=['PUT'])
 def update_vision_session_score(answer_id):
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f" Starting score update for answer ID: {answer_id} at {now}")
+    logger.info(f"Starting score update for answer ID: {answer_id} at {now}")
+
+    # Create debug info list to return in response
+    debug_info = []
+    debug_info.append(f"Starting approval for answer_id: {answer_id}")
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
+            # 1. Fetch vision answer and related vision
             cursor.execute("""
                 SELECT vqa.answer_type, vqa.vision_id, vqa.user_id, v.la_level_id
                 FROM vision_question_answers vqa
@@ -3171,73 +3279,197 @@ def update_vision_session_score(answer_id):
                 WHERE vqa.id = %s
             """, (answer_id,))
             row = cursor.fetchone()
-            
+
             if not row:
-                print(" Vision answer not found.")
-                return jsonify({'error': 'Vision answer not found'}), 404
+                logger.error("Vision answer not found")
+                debug_info.append("❌ Vision answer not found")
+                return jsonify({'error': 'Vision answer not found', 'debug': debug_info}), 404
 
             answer_type = row['answer_type']
-            level_id    = row['la_level_id']
-            user_id     = row['user_id']
+            vision_id = row['vision_id']
+            user_id = row['user_id']
+            level_id = row['la_level_id']
 
-            print(f"Fetched: answer_type={answer_type}, level_id={level_id}, user_id={user_id}")
+            debug_info.append(f"✅ Found: answer_type={answer_type}, vision_id={vision_id}, level_id={level_id}, user_id={user_id}")
+            logger.info(f"Fetched data: {debug_info[-1]}")
 
             if answer_type not in ('text', 'image'):
-                print(" Invalid answer type for admin approval.")
-                return jsonify({'error': 'Only text/image answers can be approved from admin panel'}), 400
+                debug_info.append("❌ Invalid answer type")
+                logger.error("Invalid answer type for admin approval")
+                return jsonify({'error': 'Only text/image answers can be approved from admin panel', 'debug': debug_info}), 400
 
+            # 2. Get vision reward score
             cursor.execute("""
-                SELECT vision_text_image_points
+                SELECT vision_text_image_points, teacher_correct_submission_points
                 FROM la_levels
                 WHERE id = %s
             """, (level_id,))
             level = cursor.fetchone()
+
             if not level:
-                print("Level not found.")
-                return jsonify({'error': 'Level not found'}), 404
+                debug_info.append("❌ Level not found")
+                logger.error("Level not found")
+                return jsonify({'error': 'Level not found', 'debug': debug_info}), 404
 
-            score = level['vision_text_image_points']
-            print(f" Vision points for level: {score}")
+            student_score = level['vision_text_image_points']
+            teacher_score = level['teacher_correct_submission_points']
+            debug_info.append(f"✅ Points: student={student_score}, teacher={teacher_score}")
+            logger.info(f"Points from la_levels: student_score={student_score}, teacher_score={teacher_score}")
 
+            # 3. Update student's vision_question_answer
             cursor.execute("""
                 UPDATE vision_question_answers
                 SET score = %s, updated_at = %s
                 WHERE id = %s
-            """, (score, now, answer_id))
-            print(" Score updated.")
+            """, (student_score, now, answer_id))
+            debug_info.append("✅ Student score updated")
+            logger.info("Student score updated")
 
+            # 4. Insert student coin transaction
             cursor.execute("""
                 INSERT INTO coin_transactions (user_id, type, amount, coinable_type, coinable_id, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (
                 user_id,
                 7,  # TYPE_VISION
-                score,
+                student_score,
                 'App\\Models\\VisionQuestionAnswer',
                 answer_id,
                 now,
                 now
             ))
-            print(" Coin transaction inserted.")
+            debug_info.append("✅ Student coin transaction inserted")
+            logger.info("Student coin transaction inserted")
 
+            # 5. Update student's earn_coins
             cursor.execute("""
                 UPDATE users
                 SET earn_coins = earn_coins + %s,
                     updated_at = %s
                 WHERE id = %s
-            """, (score, now, user_id))
-            print(" User's coins updated.")
+            """, (student_score, now, user_id))
+            debug_info.append("✅ Student earn_coins updated")
+            logger.info("Student earn_coins updated")
 
+            # 6. DEBUG: Check vision_assigns table structure first
+            debug_info.append(f"🔍 Looking for teacher assignment...")
+            debug_info.append(f"🔍 Searching vision_assigns: vision_id={vision_id}, user_id={user_id}")
+            logger.info(f"Looking for teacher assignment for vision_id={vision_id}, user_id={user_id}")
+            
+            # Try different possible column combinations
+            cursor.execute("SHOW COLUMNS FROM vision_assigns")
+            columns = cursor.fetchall()
+            column_names = [col['Field'] for col in columns]
+            debug_info.append(f"🔍 vision_assigns columns: {column_names}")
+            logger.info(f"vision_assigns columns: {column_names}")
+            
+            # First, let's see what's actually in vision_assigns for this vision
+            cursor.execute("""
+                SELECT * FROM vision_assigns 
+                WHERE vision_id = %s
+            """, (vision_id,))
+            all_assigns = cursor.fetchall()
+            debug_info.append(f"🔍 All assignments for vision_id {vision_id}: {len(all_assigns)} records")
+            if all_assigns:
+                debug_info.append(f"🔍 Sample assignment: {all_assigns[0]}")
+            logger.info(f"All assignments for vision_id {vision_id}: {all_assigns}")
+            
+            # Now try to find the specific assignment
+            cursor.execute("""
+                SELECT teacher_id, student_id
+                FROM vision_assigns
+                WHERE vision_id = %s AND student_id = %s
+                LIMIT 1
+            """, (vision_id, user_id))
+            teacher_row = cursor.fetchone()
+            debug_info.append(f"🔍 Teacher query (student_id): {teacher_row}")
+            logger.info(f"Teacher assignment query result: {teacher_row}")
+
+            # If that didn't work, try with user_id column if it exists
+            if not teacher_row and 'user_id' in column_names:
+                cursor.execute("""
+                    SELECT teacher_id
+                    FROM vision_assigns
+                    WHERE vision_id = %s AND user_id = %s
+                    LIMIT 1
+                """, (vision_id, user_id))
+                teacher_row = cursor.fetchone()
+                debug_info.append(f"🔍 Teacher query (user_id): {teacher_row}")
+                logger.info(f"Teacher assignment query (using user_id) result: {teacher_row}")
+
+            if teacher_row:
+                teacher_id = teacher_row['teacher_id']
+                debug_info.append(f"✅ Found teacher_id: {teacher_id}")
+                logger.info(f"Found teacher_id: {teacher_id}")
+
+                if teacher_score and teacher_score > 0:
+                    debug_info.append(f"✅ Teacher score is valid: {teacher_score}")
+                    logger.info(f"Teacher score is valid: {teacher_score}")
+                    
+                    # 7. Insert teacher transaction
+                    cursor.execute("""
+                        INSERT INTO coin_transactions (user_id, type, amount, coinable_type, coinable_id, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        teacher_id,
+                        9,  # Teacher reward type
+                        teacher_score,
+                        'App\\Models\\VisionQuestionAnswer',
+                        answer_id,
+                        now,
+                        now
+                    ))
+                    debug_info.append(f"✅ Teacher coin transaction inserted")
+                    logger.info(f"Teacher coin transaction inserted for teacher_id {teacher_id}")
+
+                    # 8. Update teacher's earn_coins
+                    cursor.execute("""
+                        UPDATE users
+                        SET earn_coins = earn_coins + %s,
+                            updated_at = %s
+                        WHERE id = %s
+                    """, (teacher_score, now, teacher_id))
+                    debug_info.append("✅ Teacher earn_coins updated")
+                    logger.info("Teacher earn_coins updated")
+                    
+                    # Verify the teacher transaction was created
+                    cursor.execute("""
+                        SELECT * FROM coin_transactions 
+                        WHERE user_id = %s AND coinable_id = %s AND type = 9
+                        ORDER BY created_at DESC LIMIT 1
+                    """, (teacher_id, answer_id))
+                    verify_transaction = cursor.fetchone()
+                    debug_info.append(f"🔍 Teacher transaction verification: {bool(verify_transaction)}")
+                    logger.info(f"Verification - Teacher transaction created: {verify_transaction}")
+                    
+                else:
+                    debug_info.append(f"⚠ No teacher reward points: teacher_score={teacher_score}")
+                    logger.warning(f"No teacher reward points set. teacher_score={teacher_score}")
+            else:
+                debug_info.append(f"⚠ No teacher assignment found")
+                logger.warning(f"No assigning teacher found for vision_id={vision_id}, user_id={user_id}")
+
+            # 9. Final commit
             conn.commit()
-            print("All updates committed successfully.")
-            return jsonify({'success': True, 'coins_awarded': score}), 200
+            debug_info.append("✅ All updates committed")
+            logger.info("All updates committed successfully")
+            return jsonify({
+                'success': True, 
+                'student_coins': student_score, 
+                'teacher_coins': teacher_score,
+                'debug': debug_info
+            }), 200
 
     except Exception as e:
-        print(f" Exception occurred: {e}")
-        return jsonify({'error': str(e)}), 500
+        debug_info.append(f"❌ Exception: {str(e)}")
+        logger.error(f"Exception occurred: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'debug': debug_info}), 500
     finally:
         conn.close()
-        print(" Database connection closed.")
+        debug_info.append("🔚 Connection closed")
+        logger.info("Database connection closed")
 
 @app.route('/api/vision_sessions/<int:answer_id>/status', methods=['PUT'])
 def update_vision_session_status(answer_id):
@@ -3768,16 +4000,23 @@ def fetch_teacher_dashboard():
     board = filters.get('board')
     # Start with base SQL. We join to la_teacher_grades (ltg), la_grades (lgr), and la_sections (lsct)
     sql = """
-        WITH cte AS (
-            SELECT count(*) as mission_assign_count, teacher_id 
+        WITH mission_cte AS (
+            SELECT teacher_id, COUNT(DISTINCT user_id) as mission_assigned_count 
             FROM lifeapp.la_mission_assigns 
+            GROUP BY teacher_id
+        ),
+        vision_cte AS (
+            SELECT teacher_id, COUNT(DISTINCT student_id) as vision_assigned_count 
+            FROM lifeapp.vision_assigns 
             GROUP BY teacher_id
         )
         SELECT 
             u.id, u.name, u.email,
             u.mobile_no, u.state, 
             u.city, ls.name as school_name, u.school_code, 
-            cte.mission_assign_count,
+            COALESCE(m.mission_assigned_count, 0) AS mission_assigned_count,
+            COALESCE(v.vision_assigned_count, 0) AS vision_assigned_count,
+            u.earn_coins,
             CASE 
                 WHEN ls.is_life_lab = 1 THEN 'Yes' 
                 ELSE 'No' 
@@ -3789,7 +4028,8 @@ def fetch_teacher_dashboard():
             lab.name as board_name
         FROM lifeapp.users u
         INNER JOIN lifeapp.schools ls ON ls.id = u.school_id
-        LEFT JOIN cte ON cte.teacher_id = u.id
+        LEFT JOIN mission_cte m ON m.teacher_id = u.id
+        LEFT JOIN vision_cte v ON v.teacher_id = u.id
         LEFT JOIN lifeapp.la_teacher_grades ltg ON ltg.user_id = u.id
         LEFT JOIN lifeapp.la_subjects las on las.id = ltg.la_subject_id
         LEFT JOIN lifeapp.la_grades lgr ON ltg.la_grade_id = lgr.id
@@ -9469,29 +9709,43 @@ def delete_s3_object(key):
     except Exception:
         pass
 
-# GET coupons with filters
+#Get all Coupons
 @app.route('/api/coupons', methods=['GET'])
 def get_coupons():
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            start_date = request.args.get('start_date')
-            end_date = request.args.get('end_date')
-            type_filter = request.args.get('type')  # 1=student, 2=teacher
-            
+            start_date   = request.args.get('start_date')
+            end_date     = request.args.get('end_date')
+            type_filter  = request.args.get('type')  # 1=student, 2=teacher
+            status_filter = request.args.get('status')  # 1=active, 0=inactive
+
             base_query = '''
             SELECT 
-                c.id, c.title, c.category_id, 
-                c.coin, c.link, c.details, 
-                c.index, c.coupon_media_id as media_id, 
-                c.created_at, c.updated_at, c.type, c.status,
-                m.path as media_path
+                c.id,
+                c.title,
+                c.category_id,
+                cat.title       AS category_title,
+                c.coin,
+                c.link,
+                c.details,
+                c.index,
+                c.coupon_media_id AS media_id,
+                c.created_at,
+                c.updated_at,
+                c.type,
+                c.status,
+                m.path          AS media_path
             FROM lifeapp.coupons c
-                LEFT JOIN lifeapp.media m ON c.coupon_media_id = m.id
+            LEFT JOIN lifeapp.categories cat 
+              ON c.category_id = cat.id
+            LEFT JOIN lifeapp.media m 
+              ON c.coupon_media_id = m.id
             '''
+
             conditions = []
-            params = []
-            
+            params     = []
+
             # Date filters
             if start_date:
                 conditions.append('c.created_at >= %s')
@@ -9499,32 +9753,49 @@ def get_coupons():
             if end_date:
                 conditions.append('c.created_at <= %s')
                 params.append(end_date)
-                
-            # Type filter - FIXED: Properly handle type filter
+
+            # Type filter
             if type_filter and type_filter in ('1', '2'):
                 conditions.append('c.type = %s')
-                params.append(int(type_filter))  # Convert to integer
-            
+                params.append(int(type_filter))
+
+            # Status filter
+            if status_filter and status_filter in ('0', '1'):
+                conditions.append('c.status = %s')
+                params.append(int(status_filter))
+
             # Build final query
             if conditions:
                 base_query += ' WHERE ' + ' AND '.join(conditions)
-            
+
             cursor.execute(base_query, params)
             coupons = cursor.fetchall()
-            base_url = os.getenv('BASE_URL')
+
+            base_url = os.getenv('BASE_URL', '').rstrip('/')
             for r in coupons:
-                if r.get('media_path'):
-                    r['media_url'] = f"{base_url}/{r['media_path']}"
-                else:
-                    r['media_url'] = None
-        
+                r['media_url'] = f"{base_url}/{r['media_path']}" if r.get('media_path') else None
+
             return jsonify({'count': len(coupons), 'data': coupons})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
 
-# POST add coupon -
+# check the settings/category section for the categories API
+# @app.route('/api/categories', methods=['GET'])
+# def get_categories():
+#     conn = get_db_connection()
+#     try:
+#         with conn.cursor() as cursor:
+#             cursor.execute("SELECT id, title FROM lifeapp.categories")
+#             categories = cursor.fetchall()
+#             return jsonify(categories)
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
+#     finally:
+#         conn.close()
+
+# POST add coupon - 
 @app.route('/api/coupons', methods=['POST'])
 def add_coupon():
     form = request.form
@@ -9568,7 +9839,7 @@ def add_coupon():
     finally:
         conn.close()
 
-# PUT update coupon -
+# PUT update coupon - 
 @app.route('/api/coupons/<int:id>', methods=['PUT'])
 def update_coupon(id):
     form = request.form
@@ -9664,6 +9935,103 @@ def delete_coupon(id):
     finally:
         conn.close()
 
+###################################################################################
+###################################################################################
+######################## SETTINGS/CATEGORY APIs ###################################
+###################################################################################
+###################################################################################
+
+# Get all categories already implemented for settings/coupons section 
+@app.route('/api/categories', methods=['GET'])
+def get_categories():
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, title, created_at, updated_at
+                FROM lifeapp.categories
+                ORDER BY created_at ASC
+            """)
+            categories = cursor.fetchall()
+            return jsonify(categories)
+    except Exception as e:
+        print(f"Error fetching categories: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
+@app.route('/api/categories', methods=['POST'])
+def create_category():
+    data = request.get_json()
+    title = data.get('title')
+    
+    if not title:
+        return jsonify({'error': 'Title is required'}), 400
+        
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO lifeapp.categories (title, created_at, updated_at)
+                VALUES (%s, NOW(), NOW())
+            """, (title,))
+            connection.commit()
+            return jsonify({'success': True}), 201
+    except Exception as e:
+        print(f"Error creating category: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
+@app.route('/api/categories/<int:id>', methods=['PUT'])
+def update_category(id):
+    data = request.get_json()
+    title = data.get('title')
+    
+    if not title:
+        return jsonify({'error': 'Title is required'}), 400
+        
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                UPDATE lifeapp.categories
+                SET title = %s, updated_at = NOW()
+                WHERE id = %s
+            """, (title, id))
+            connection.commit()
+            
+            if cursor.rowcount == 0:
+                return jsonify({'error': 'Category not found'}), 404
+                
+            return jsonify({'success': True}), 200
+    except Exception as e:
+        print(f"Error updating category: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
+@app.route('/api/categories/<int:id>', methods=['DELETE'])
+def delete_category(id):
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                DELETE FROM lifeapp.categories
+                WHERE id = %s
+            """, (id,))
+            connection.commit()
+            
+            if cursor.rowcount == 0:
+                return jsonify({'error': 'Category not found'}), 404
+                
+            return jsonify({'success': True}), 200
+    except Exception as e:
+        print(f"Error deleting category: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+        
 ###################################################################################
 ###################################################################################
 ####################### CAMPAIGNS APIs ############################################
