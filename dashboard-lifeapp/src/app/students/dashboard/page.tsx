@@ -5175,6 +5175,27 @@ export default function StudentDashboard() {
                       )}
                     </select>
                   </div>
+
+                  <div className="col-12 col-md-6 col-lg-3">
+                    <SearchableDropdown
+                      options={states}
+                      placeholder="Select State"
+                      value={selectedState ? [selectedState] : []} // Convert to array
+                      onChange={(vals) => setSelectedState(vals[0] || "")} // Take first value
+                      isLoading={isStatesLoading}
+                      maxDisplayItems={200}
+                    />
+                  </div>
+                  <div className="col-12 col-md-6 col-lg-3">
+                    <SearchableDropdown
+                      options={cities}
+                      placeholder="Select city"
+                      value={selectedCity ? [selectedCity] : []} // Convert to array
+                      onChange={(vals) => setSelectedCity(vals[0] || "")} // Take first value
+                      isLoading={isCitiesLoading}
+                      maxDisplayItems={200}
+                    />
+                  </div>
                   <div className="col-12 col-md-6 col-lg-3">
                     <SearchableDropdown
                       options={schools}
@@ -5202,28 +5223,6 @@ export default function StudentDashboard() {
                     </select>
                   </div>
 
-                  <div className="col-12 col-md-6 col-lg-3">
-                    <SearchableDropdown
-                      options={states}
-                      placeholder="Select State"
-                      value={selectedState ? [selectedState] : []} // Convert to array
-                      onChange={(vals) => setSelectedState(vals[0] || "")} // Take first value
-                      isLoading={isStatesLoading}
-                      maxDisplayItems={200}
-                    />
-                  </div>
-
-                  {/* Dropdowns Row 2 */}
-                  <div className="col-12 col-md-6 col-lg-3">
-                    <SearchableDropdown
-                      options={cities}
-                      placeholder="Select city"
-                      value={selectedCity ? [selectedCity] : []} // Convert to array
-                      onChange={(vals) => setSelectedCity(vals[0] || "")} // Take first value
-                      isLoading={isCitiesLoading}
-                      maxDisplayItems={200}
-                    />
-                  </div>
                   <div className="col-12 col-md-6 col-lg-3">
                     <select
                       className="form-select"
