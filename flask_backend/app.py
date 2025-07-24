@@ -2235,8 +2235,7 @@ def search():
     cursor = None
     try:
         # --- Database Connection ---
-        # IMPORTANT: Replace with your actual database connection logic
-        connection = get_db_connection() # Assuming you have a function like this
+        connection = get_db_connection()
         cursor = connection.cursor(pymysql.cursors.DictCursor)
 
         filters = request.get_json() or {}
@@ -2246,12 +2245,12 @@ def search():
         state = filters.get('state')
         city = filters.get('city')
         grade = filters.get('grade')
-        school_codes = filters.get('schoolCode') # Expecting a list or None
+        school_codes = filters.get('schoolCode')  # Expecting a list or None
         # Mission Filters
         mission_acceptance = filters.get('mission_acceptance')
         mission_requested_no = filters.get('mission_requested_no')
         mission_accepted_no = filters.get('mission_accepted_no')
-        # Quiz Filters (Note: Quiz stats CTE seems missing in the provided snippets)
+        # Quiz Filters
         quiz_acceptance = filters.get('quiz_acceptance')
         quiz_requested_no = filters.get('quiz_requested_no')
         quiz_accepted_no = filters.get('quiz_accepted_no')
@@ -2267,14 +2266,11 @@ def search():
         # Mobile Filter
         mobile_no = filters.get('mobile_no')
         # Campaign Filter
-        campaign_id = filters.get('campaign_id') # This will be a string or None
+        campaign_id = filters.get('campaign_id')  # This will be a string or None
         # School Filter (Multi-select)
-        school_names = filters.get('school') # Expecting a list or None from frontend
+        school_names = filters.get('school')  # Expecting a list or None from frontend
 
         # --- Base SQL Query (CTE Part) ---
-        # NOTE: Ensure the CTE structure matches your database schema.
-        # The provided snippets suggest user_quiz_stats might be missing.
-        # I'm including it based on the initial structure you showed.
         sql = """
         WITH user_mission_stats AS (
             SELECT
@@ -2289,14 +2285,13 @@ def search():
                 user_id,
                 COUNT(*) AS total_quizzes_requested,
                 SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END) AS total_quizzes_accepted
-                -- SUM(quiz_score) AS total_quiz_score -- Add if needed and column exists
             FROM lifeapp.la_quiz_games
             GROUP BY user_id
         ),
         user_vision_stats AS (
             SELECT
                 user_id,
-                COUNT(DISTINCT vision_id) AS total_visions_requested, -- Adjust logic if needed
+                COUNT(DISTINCT vision_id) AS total_visions_requested,
                 SUM(CASE WHEN approved_at IS NOT NULL THEN 1 ELSE 0 END) AS total_visions_accepted
             FROM lifeapp.vision_question_answers
             GROUP BY user_id
@@ -2306,29 +2301,25 @@ def search():
                 u.id, u.name, ls.name AS school_name, u.guardian_name, u.email, u.username,
                 u.mobile_no, u.dob, CASE WHEN u.type = 3 THEN 'Student' ELSE 'Unknown' END AS user_type,
                 u.grade, u.city, u.state, u.address, u.earn_coins, u.heart_coins, u.brain_coins,
-                u.school_id, u.school_code, -- Include if needed for filtering/export
+                u.school_id, u.school_code,
                 COALESCE(ums.total_missions_requested, 0) AS total_missions_requested,
                 COALESCE(ums.total_missions_accepted, 0) AS total_missions_accepted,
                 COALESCE(uqs.total_quizzes_requested, 0) AS total_quizzes_requested,
                 COALESCE(uqs.total_quizzes_accepted, 0) AS total_quizzes_accepted,
-                -- COALESCE(uqs.total_quiz_score, 0) AS total_quiz_score, -- Add if CTE includes it
                 COALESCE(uvs.total_visions_requested, 0) AS total_visions_requested,
                 COALESCE(uvs.total_visions_accepted, 0) AS total_visions_accepted
             FROM users u
-            LEFT JOIN lifeapp.schools ls ON u.school_id = ls.id -- Check table name: schools vs la_schools
+            LEFT JOIN lifeapp.schools ls ON u.school_id = ls.id
             LEFT JOIN user_mission_stats ums ON u.id = ums.user_id
             LEFT JOIN user_quiz_stats uqs ON u.id = uqs.user_id
             LEFT JOIN user_vision_stats uvs ON u.id = uvs.user_id
             WHERE u.type = 3
         )
         """
-        # --- IMPORTANT: Initialize main_sql and params AFTER the CTE definition ---
-        # This is the fix for the "cannot access local variable 'main_sql'" error.
-        main_sql = "SELECT * FROM cte WHERE 1=1" # Start building the WHERE clause
-        params = [] # Parameters for the main WHERE clause
+        main_sql = "SELECT * FROM cte WHERE 1=1"
+        params = []
 
-        # --- Append filter conditions for the main query ---
-
+        # --- Filter Conditions ---
         # State Filter
         if state:
             main_sql += " AND state = %s"
@@ -2349,28 +2340,25 @@ def search():
             main_sql += " AND mobile_no = %s"
             params.append(mobile_no)
 
-        # - School Filter Logic (Multi-select) -
-        # Use school_code filter if provided (as it's usually more reliable)
+        # School Filter Logic
         if school_codes and isinstance(school_codes, list) and len(school_codes) > 0:
             if len(school_codes) == 1:
                 main_sql += " AND school_code = %s"
                 params.append(school_codes[0])
-            else: # Multiple codes
+            else:
                 placeholders = ','.join(['%s'] * len(school_codes))
                 main_sql += f" AND school_code IN ({placeholders})"
-                params.extend(school_codes) # Use extend for list of params
-        # Fallback to school name filter if school_code is not provided
+                params.extend(school_codes)
         elif school_names and isinstance(school_names, list) and len(school_names) > 0:
             if len(school_names) == 1:
                 main_sql += " AND school_name = %s"
                 params.append(school_names[0])
-            else: # Multiple names
-                 placeholders = ','.join(['%s'] * len(school_names))
-                 main_sql += f" AND school_name IN ({placeholders})"
-                 params.extend(school_names) # Use extend for list of params
-        # - End of School Filter Logic -
+            else:
+                placeholders = ','.join(['%s'] * len(school_names))
+                main_sql += f" AND school_name IN ({placeholders})"
+                params.extend(school_names)
 
-        # --- Mission Filters ---
+        # Mission Filters
         if mission_acceptance is not None:
             acceptance_value = str(mission_acceptance).strip().lower()
             if acceptance_value == 'requested':
@@ -2378,7 +2366,6 @@ def search():
             elif acceptance_value == 'approved':
                 main_sql += " AND total_missions_accepted > 0"
             elif acceptance_value == 'rejected':
-                # Assuming rejected means requested but none approved
                 main_sql += " AND (total_missions_requested > 0 AND total_missions_accepted = 0)"
 
         if mission_requested_no:
@@ -2396,19 +2383,16 @@ def search():
                 params.append(man)
             except ValueError:
                 logger.warning(f"Invalid mission_accepted_no value: {mission_accepted_no}")
-        # --- End of Mission Filters ---
 
-        # --- Quiz Filters ---
-        # Note: Ensure user_quiz_stats CTE is correctly defined if these filters are used.
+        # Quiz Filters
         if quiz_acceptance is not None:
-             acceptance_value = str(quiz_acceptance).strip().lower()
-             if acceptance_value == 'requested':
-                 main_sql += " AND total_quizzes_requested > 0"
-             elif acceptance_value == 'approved':
-                 main_sql += " AND total_quizzes_accepted > 0"
-             elif acceptance_value == 'rejected':
-                 # Assuming rejected means requested but none approved
-                 main_sql += " AND (total_quizzes_requested > 0 AND total_quizzes_accepted = 0)"
+            acceptance_value = str(quiz_acceptance).strip().lower()
+            if acceptance_value == 'requested':
+                main_sql += " AND total_quizzes_requested > 0"
+            elif acceptance_value == 'approved':
+                main_sql += " AND total_quizzes_accepted > 0"
+            elif acceptance_value == 'rejected':
+                main_sql += " AND (total_quizzes_requested > 0 AND total_quizzes_accepted = 0)"
 
         if quiz_requested_no:
             try:
@@ -2425,9 +2409,8 @@ def search():
                 params.append(qan)
             except ValueError:
                 logger.warning(f"Invalid quiz_accepted_no value: {quiz_accepted_no}")
-        # --- End of Quiz Filters ---
 
-        # --- Vision Filters ---
+        # Vision Filters
         if vision_acceptance is not None:
             acceptance_value = str(vision_acceptance).strip().lower()
             if acceptance_value == 'requested':
@@ -2435,7 +2418,6 @@ def search():
             elif acceptance_value == 'approved':
                 main_sql += " AND total_visions_accepted > 0"
             elif acceptance_value == 'rejected':
-                # Assuming rejected means requested but none approved
                 main_sql += " AND (total_visions_requested > 0 AND total_visions_accepted = 0)"
 
         if vision_requested_no:
@@ -2453,9 +2435,8 @@ def search():
                 params.append(van)
             except ValueError:
                 logger.warning(f"Invalid vision_accepted_no value: {vision_accepted_no}")
-        # --- End of Vision Filters ---
 
-        # --- Coin Filter ---
+        # Coin Filter
         if earn_coins:
             try:
                 coins = int(earn_coins)
@@ -2463,15 +2444,12 @@ def search():
                 params.append(coins)
             except ValueError:
                 logger.warning(f"Invalid earn_coins value: {earn_coins}")
-        # --- End of Coin Filter ---
 
-        # --- Date Filters ---
-        # IMPORTANT: Adjust the column name (e.g., u.created_at, u.registered_at)
-        # based on your actual `users` table schema.
+        # Date Filters
         if from_date:
             try:
                 from_dt = datetime.strptime(from_date, '%Y-%m-%d')
-                main_sql += " AND created_at >= %s" # Adjust column name
+                main_sql += " AND created_at >= %s"
                 params.append(from_dt)
             except ValueError:
                 logger.warning(f"Invalid from_date format: {from_date}")
@@ -2479,85 +2457,101 @@ def search():
         if to_date:
             try:
                 to_dt = datetime.strptime(to_date, '%Y-%m-%d')
-                # Include the whole day
                 to_dt_end = datetime.combine(to_dt.date(), datetime.max.time())
-                main_sql += " AND created_at <= %s" # Adjust column name
+                main_sql += " AND created_at <= %s"
                 params.append(to_dt_end)
             except ValueError:
                 logger.warning(f"Invalid to_date format: {to_date}")
-        # --- End of Date Filters ---
 
-        # --- Campaign Filter (FIXED LOGIC AND POSITIONING) ---
-        # Variables for campaign filter clause and parameters
-        campaign_filter_clause = ""
-        campaign_filter_params = []
-
+        # --- Campaign Filter with Date Range ---
         if campaign_id:
             logger.info(f"Processing campaign filter for campaign_id: {campaign_id}")
             try:
-                # Attempt to convert campaign_id to integer
                 campaign_id_int = int(campaign_id)
-
-                # 1. Fetch campaign details from the database
+                
+                # Fetch campaign details including dates
                 cursor.execute("""
-                    SELECT game_type, reference_id
+                    SELECT game_type, reference_id, scheduled_for, ended_at
                     FROM lifeapp.la_campaigns
                     WHERE id = %s
-                """, (campaign_id_int,)) # Use tuple for single parameter
+                """, (campaign_id_int,))
                 campaign_details = cursor.fetchone()
 
                 if not campaign_details:
                     logger.warning(f"Campaign ID {campaign_id_int} not found.")
-                    # Option 1: Return no results if campaign not found
-                    # campaign_filter_clause = " AND FALSE "
-                    # campaign_filter_params = [] # No params needed for FALSE
-                    # Option 2: Ignore the filter if campaign not found (silently)
-                    # Just don't set campaign_filter_clause/params
-                    pass # Do nothing, filter is ignored
                 else:
                     game_type = campaign_details['game_type']
                     reference_id = campaign_details['reference_id']
-                    logger.info(f"Campaign {campaign_id_int} details: game_type={game_type}, reference_id={reference_id}")
-
-                    # 2. Build parameterized subquery based on game_type
-                    # IMPORTANT: Use 'id' (the alias from the CTE), NOT 'u.id'
+                    start_date = campaign_details['scheduled_for']
+                    
+                    # Handle end date - use current time if not set
+                    end_date = campaign_details['ended_at'] or datetime.utcnow()
+                    
+                    # Convert to datetime objects if needed
+                    if isinstance(start_date, str):
+                        start_date = datetime.strptime(str(start_date), '%Y-%m-%d')
+                    if isinstance(end_date, str):
+                        end_date = datetime.strptime(str(end_date), '%Y-%m-%d %H:%M:%S')
+                    
+                    logger.info(f"Campaign dates: {start_date} to {end_date}")
+                    
+                    # Build subquery with date range filter
                     if game_type == 1:  # Mission
-                        campaign_filter_clause = " AND id IN (SELECT DISTINCT user_id FROM lifeapp.la_mission_completes WHERE la_mission_id = %s)"
-                        campaign_filter_params = [reference_id] # Use list for params
-                        logger.info(f"Filtering by Mission ID: {reference_id}")
+                        campaign_filter_clause = """
+                            AND id IN (
+                                SELECT DISTINCT user_id 
+                                FROM lifeapp.la_mission_completes 
+                                WHERE la_mission_id = %s 
+                                    AND approved_at IS NOT NULL
+                                    AND approved_at BETWEEN %s AND %s
+                            )
+                        """
+                        campaign_filter_params = [reference_id, start_date, end_date]
+                        logger.info(f"Filtering by Mission ID: {reference_id} with date range")
+
                     elif game_type == 2:  # Quiz
-                        # IMPORTANT: Verify the column name in la_quiz_games that links to the quiz topic/content (reference_id)
-                        # It might be 'la_topic_id', 'la_quiz_id', 'topic_id'. Check your schema.
-                        campaign_filter_clause = " AND id IN (SELECT DISTINCT user_id FROM lifeapp.la_quiz_games WHERE la_topic_id = %s)" # Verify column name
-                        campaign_filter_params = [reference_id]
-                        logger.info(f"Filtering by Quiz Topic ID: {reference_id}") # Adjust log message
+                        campaign_filter_clause = """
+                            AND id IN (
+                                SELECT DISTINCT user_id 
+                                FROM lifeapp.la_quiz_games 
+                                WHERE la_topic_id = %s 
+                                    AND completed_at IS NOT NULL
+                                    AND completed_at BETWEEN %s AND %s
+                            )
+                        """
+                        campaign_filter_params = [reference_id, start_date, end_date]
+                        logger.info(f"Filtering by Quiz Topic ID: {reference_id} with date range")
+
                     elif game_type == 7:  # Vision
-                        # IMPORTANT: Verify the column name in vision_question_answers that links to the vision content (reference_id)
-                        # Also verify if 'is_first_attempt = 1' is the correct condition for identifying completion.
-                        campaign_filter_clause = " AND id IN (SELECT DISTINCT user_id FROM lifeapp.vision_question_answers WHERE vision_id = %s AND is_first_attempt = 1)" # Verify column name and condition
-                        campaign_filter_params = [reference_id]
-                        logger.info(f"Filtering by Vision ID: {reference_id}") # Adjust log message
+                        campaign_filter_clause = """
+                            AND id IN (
+                                SELECT DISTINCT user_id 
+                                FROM lifeapp.vision_question_answers 
+                                WHERE vision_id = %s 
+                                    AND is_first_attempt = 1
+                                    AND created_at BETWEEN %s AND %s
+                            )
+                        """
+                        campaign_filter_params = [reference_id, start_date, end_date]
+                        logger.info(f"Filtering by Vision ID: {reference_id} with date range")
+
                     else:
-                        logger.warning(f"Unsupported game_type {game_type} for campaign_id {campaign_id_int}")
-                        # Ignore unsupported game types
+                        logger.warning(f"Unsupported game_type {game_type}")
+                        campaign_filter_clause = ""
+                        campaign_filter_params = []
+
+                    if campaign_filter_clause:
+                        main_sql += campaign_filter_clause
+                        params.extend(campaign_filter_params)
+                        logger.debug(f"Added campaign filter: {campaign_filter_clause}")
 
             except ValueError as e:
-                logger.error(f"Invalid campaign_id provided: {campaign_id}. Error: {e}")
-                # Ignore the invalid filter, proceed without it
+                logger.error(f"Invalid campaign_id: {campaign_id}. Error: {e}")
             except Exception as e:
-                logger.error(f"Database error fetching campaign details for ID {campaign_id}: {e}")
-                # Ignore the campaign filter on error, proceed without it
-
-            # 3. Append the campaign filter clause and its parameters to the main query
-            # ONLY if the clause was built successfully
-            if campaign_filter_clause:
-                 main_sql += campaign_filter_clause # Append the clause string
-                 params.extend(campaign_filter_params) # Add params to main list
-                 logger.debug(f"Campaign filter applied: {campaign_filter_clause}, Params: {campaign_filter_params}")
-        # --- End of Campaign Filter ---
+                logger.error(f"Error processing campaign filter: {str(e)}")
 
         # --- Final Query Execution ---
-        final_sql = sql + main_sql + " ORDER BY id" # Add ordering if desired
+        final_sql = sql + main_sql + " ORDER BY id"
         logger.debug(f"Final SQL Query: {final_sql}")
         logger.debug(f"Final SQL Params: {params}")
 
@@ -2568,9 +2562,9 @@ def search():
         return jsonify(result), 200
 
     except Exception as e:
-        logger.error(f"Error in /api/student_dashboard_search: {str(e)}")
+        logger.error(f"Error in /api/student_dashboard_search: {str(e)}", exc_info=True)
         if connection:
-            connection.rollback() # Good practice in case of errors
+            connection.rollback()
         return jsonify({"error": str(e)}), 500
 
     finally:
@@ -2578,7 +2572,7 @@ def search():
             cursor.close()
         if connection:
             connection.close()
-
+            
 
 @app.route('/api/add_student', methods=['POST'])
 def add_student():
