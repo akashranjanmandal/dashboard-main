@@ -549,78 +549,74 @@ export default function StudentDashboard() {
   const [schools, setSchools] = useState<string[]>([]);
   const [isSchoolsLoading, setIsSchoolsLoading] = useState(false);
   const [selectedSchools, setSelectedSchools] = useState<string[]>([]);
-  useEffect(() => {
-    async function fetchSchools() {
-      // Check cache first
-      const cachedSchools = sessionStorage.getItem("SchoolList");
-      if (cachedSchools) {
-        try {
-          const parsed = JSON.parse(cachedSchools);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setSchools(parsed);
-            return;
-          }
-        } catch (err) {
-          console.error("Error parsing cached schools:", err);
-          // Continue to fetch if cache parse fails
-        }
-      }
 
+  useEffect(() => {
+    // Key improvement: UseEffect to trigger data fetch when state or city changes
+    // Also fetch initially when component loads
+    console.log(
+      "🔄 Triggering school fetch based on state/city change or initial load"
+    );
+
+    // Function to fetch schools based on current filters
+    async function fetchFilteredSchools() {
       setIsSchoolsLoading(true);
       try {
-        const res = await fetch(`${api_startpoint}/api/school_list`);
+        // Prepare filters for the API call
+        const filters: { state?: string; city?: string } = {};
+        if (selectedState) {
+          filters.state = selectedState;
+        }
+        if (selectedCity) {
+          filters.city = selectedCity;
+        }
+
+        // Decide which endpoint to call
+        let apiUrl = `${api_startpoint}/api/school_list`; // Default: all schools
+        let fetchOptions: RequestInit = { method: "GET" };
+
+        // If any filter is active, use the new filtered endpoint
+        if (selectedState || selectedCity) {
+          apiUrl = `${api_startpoint}/api/schools_by_filters`;
+          fetchOptions = {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(filters),
+          };
+        }
+
+        console.log(`Fetching schools from: ${apiUrl}`, filters); // Debug log
+
+        const res = await fetch(apiUrl, fetchOptions);
         const data: { name: string }[] = await res.json();
 
         if (Array.isArray(data)) {
-          // Create a reference to collect all processed schools
-          let allProcessedSchools: string[] = [];
+          // Process data: extract names and filter out empties
+          // Using the simpler direct processing as the chunked version was for the large unfiltered list
+          const schoolList = data
+            .map((item) => (item.name ? item.name.trim() : ""))
+            .filter((name) => name !== "");
 
-          // Process data in chunks to avoid UI freezing with large datasets
-          const processSchoolsBatch = (
-            startIndex: number,
-            batchSize: number
-          ): void => {
-            const endIndex = Math.min(startIndex + batchSize, data.length);
-            const batch = data
-              .slice(startIndex, endIndex)
-              .map((item) => (item.name ? item.name.trim() : ""))
-              .filter((name) => name !== "");
-
-            // Add to our complete collection
-            allProcessedSchools = [...allProcessedSchools, ...batch];
-
-            // Update the state with what we've processed so far
-            setSchools(allProcessedSchools);
-
-            if (endIndex < data.length) {
-              // Process next batch in the next tick to avoid blocking the UI
-              setTimeout(() => processSchoolsBatch(endIndex, batchSize), 0);
-            } else {
-              // All done, cache the results using our complete reference
-              sessionStorage.setItem(
-                "SchoolList",
-                JSON.stringify(allProcessedSchools)
-              );
-              setIsSchoolsLoading(false);
-            }
-          };
-
-          // Start processing in batches (100 items at a time)
-          processSchoolsBatch(0, 100);
+          setSchools(schoolList);
+          console.log(`✅ Loaded ${schoolList.length} schools`);
+          // Note: Removed caching for simplicity with filtered results.
+          // You could implement a more complex cache key system if needed later.
         } else {
-          console.error("Unexpected API response format:", data);
+          console.error("Unexpected API response format for schools:", data);
           setSchools([]);
-          setIsSchoolsLoading(false);
         }
       } catch (error) {
-        console.error("Error fetching School list:", error);
+        console.error("❌ Error fetching School list:", error);
         setSchools([]);
+      } finally {
         setIsSchoolsLoading(false);
       }
     }
 
-    fetchSchools();
-  }, []);
+    // Call the fetch function
+    fetchFilteredSchools();
+
+    // Dependency array: re-run this effect when selectedState or selectedCity changes
+  }, [selectedState, selectedCity]);
 
   const [selectedGrade, setSelectedGrade] = useState("");
   const [selectedMissionType, setSelectedMissionType] = useState("");
@@ -835,32 +831,62 @@ export default function StudentDashboard() {
   }, [newStudent.state]);
 
   // inside your modal component:
+  // Inside Add Student Modal section
   const [schoolOptions, setSchoolOptions] = useState<
     { id: string; name: string; code: string }[]
-  >([]);
-  const [isSchoolsAddLoading, setIsSchoolsAddLoading] = useState(false);
+  >([]); // Already exists
+  const [isSchoolsAddLoading, setIsSchoolsAddLoading] = useState(false); // Already exists
 
+  // Modify this useEffect for Add Student Modal
   useEffect(() => {
-    // fetch only when modal opens
-    async function loadSchools() {
+    // fetch schools based on selected state and city in the Add modal
+    async function loadSchoolsForAdd() {
       setIsSchoolsAddLoading(true);
       try {
-        const res = await fetch(`${api_startpoint}/api/new_school_list`, {
-          method: "GET",
-        });
+        // Determine query parameters based on current selections in the Add modal
+        let url = `${api_startpoint}/api/schools_by_state_city`;
+        const params = new URLSearchParams();
+        if (newStudent.state) {
+          params.append("state", newStudent.state);
+        }
+        if (newStudent.city) {
+          // Only add city filter if city is selected
+          params.append("city", newStudent.city);
+        }
+        if (params.toString()) {
+          url += `?${params.toString()}`;
+        }
+
+        const res = await fetch(url);
         const data = await res.json();
-        // expect data = [{ id, name, code }, …]
+        // Expect data = [{ id, name, code }, …]
         setSchoolOptions(data);
       } catch (err) {
-        console.error(err);
-        setSchoolOptions([]);
+        console.error("Error fetching schools for Add modal:", err);
+        setSchoolOptions([]); // Clear options on error or show error state
       } finally {
         setIsSchoolsAddLoading(false);
       }
     }
 
-    if (isAddOpen) loadSchools();
-  }, [isAddOpen]);
+    // Load schools when modal opens AND whenever state or city changes in the Add modal
+    if (isAddOpen) {
+      loadSchoolsForAdd();
+    }
+  }, [isAddOpen, newStudent.state, newStudent.city]); // Add newStudent.state and newStudent.city as dependencies
+
+  useEffect(() => {
+    if (newStudent.state || newStudent.city) {
+      // Clear school if state or city changes
+      setNewStudent((s) => ({
+        ...s,
+        city: newStudent.state ? s.city : "", // Clear city only if state is cleared
+        school_name: "", // Clear selected school name
+        school_id: "",
+        school_code: "",
+      }));
+    }
+  }, [newStudent.state, newStudent.city]); // Depend on both state and city changes
 
   // ````````````````` EDIT MODAL ``````````````````````````````````````````
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -926,33 +952,69 @@ export default function StudentDashboard() {
     }
   }, [editingStudent?.state]);
 
-  // inside your modal component:
+  // Inside Edit Student Modal section
   const [schoolEditOptions, setSchoolEditOptions] = useState<
     { id: string; name: string; code: string }[]
-  >([]);
-  const [isSchoolsEditLoading, setIsSchoolsEditLoading] = useState(false);
+  >([]); // Already exists
+  const [isSchoolsEditLoading, setIsSchoolsEditLoading] = useState(false); // Already exists
 
+  // Modify this useEffect for Edit Student Modal
   useEffect(() => {
-    // fetch only when modal opens
-    async function loadSchools() {
+    // fetch schools based on selected state and city in the Edit modal
+    async function loadSchoolsForEdit() {
       setIsSchoolsEditLoading(true);
       try {
-        const res = await fetch(`${api_startpoint}/api/new_school_list`, {
-          method: "GET",
-        });
+        // Determine query parameters based on current selections in the Edit modal
+        let url = `${api_startpoint}/api/schools_by_state_city`;
+        const params = new URLSearchParams();
+        if (editingStudent?.state) {
+          // Use optional chaining
+          params.append("state", editingStudent.state);
+        }
+        if (editingStudent?.city) {
+          // Use optional chaining, only add city filter if city is selected
+          params.append("city", editingStudent.city);
+        }
+        if (params.toString()) {
+          url += `?${params.toString()}`;
+        }
+
+        const res = await fetch(url);
         const data = await res.json();
-        // expect data = [{ id, name, code }, …]
+        // Expect data = [{ id, name, code }, …]
         setSchoolEditOptions(data);
       } catch (err) {
-        console.error(err);
-        setSchoolEditOptions([]);
+        console.error("Error fetching schools for Edit modal:", err);
+        setSchoolEditOptions([]); // Clear options on error or show error state
       } finally {
         setIsSchoolsEditLoading(false);
       }
     }
 
-    if (isEditOpen) loadSchools();
-  }, [isEditOpen]);
+    // Load schools when modal opens AND whenever state or city changes in the Edit modal
+    if (isEditOpen) {
+      loadSchoolsForEdit();
+    }
+  }, [isEditOpen, editingStudent?.state, editingStudent?.city]); // Add editingStudent?.state and editingStudent?.city as dependencies
+
+  // Ensure school fields are cleared when state or city changes in Edit modal
+  // You might already have a useEffect for state changing city, modify it or add:
+  useEffect(() => {
+    if (editingStudent?.state || editingStudent?.city) {
+      // Clear school if state or city changes
+      setEditingStudent((s: any) => ({
+        ...s,
+        city: editingStudent?.state ? s.city : "", // Clear city only if state is cleared
+        school_name: "", // Clear selected school name
+        school_id: "",
+        school_code: "",
+      }));
+      // Note: Changing editingStudent.city here might trigger the above useEffect.
+      // The fetch will happen due to the dependency array [isEditOpen, editingStudent?.state, editingStudent?.city]
+      // Reset the selected school name in the dropdown
+      // This might be handled by the onChange logic resetting school_name, but clearing it here ensures consistency.
+    }
+  }, [editingStudent?.state, editingStudent?.city]); // Depend on both state and city changes
 
   // ````````````````` DELETE MODAL ``````````````````````````````````````````
   // Delete modal state
