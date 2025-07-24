@@ -326,6 +326,7 @@ export default function StudentDashboard() {
   const [selectedVisionAcceptedNo, setSelectedVisionAcceptedNo] = useState("");
   const [totalStudents, setTotalStudents] = useState<number>(0);
   const [selectedState, setSelectedState] = useState("");
+  const [selectedCampaignId, setSelectedCampaignId] = useState("");
 
   useEffect(() => {
     async function fetchStudentCount() {
@@ -345,7 +346,7 @@ export default function StudentDashboard() {
 
   const [states, setStates] = useState<string[]>([]);
   const [isStatesLoading, setIsStatesLoading] = useState(false);
-
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   useEffect(() => {
     async function fetchStates() {
       // Check cache first
@@ -381,6 +382,29 @@ export default function StudentDashboard() {
     }
 
     fetchStates();
+  }, []);
+
+  useEffect(() => {
+    const fetchCampaigns = async () => {
+      try {
+        // Adjust the URL and pagination parameters as needed for your campaigns API
+        const response = await fetch(
+          `${api_startpoint}/api/campaigns?page=1&per_page=1000`
+        );
+        const data = await response.json();
+        if (data && data.data) {
+          setCampaigns(data.data);
+        } else {
+          console.error("Unexpected API response format for campaigns:", data);
+          setCampaigns([]);
+        }
+      } catch (error) {
+        console.error("❌ Error fetching Campaign list:", error);
+        setCampaigns([]);
+      }
+    };
+
+    fetchCampaigns();
   }, []);
 
   // For city fetching - optimized but independent of state
@@ -656,6 +680,7 @@ export default function StudentDashboard() {
       mobile_no: selectedMobileNo,
       schoolCode:
         selectedSchoolCode.length > 0 ? selectedSchoolCode : undefined,
+      campaign_id: selectedCampaignId || undefined,
     };
     setIsTableLoading(true); // Set loading to true when search starts
 
@@ -702,6 +727,7 @@ export default function StudentDashboard() {
     setSelectedMobileNo("");
     setInputCode("");
     setSelectedSchoolCode([]);
+    setSelectedCampaignId("");
     setTableData([]);
   };
 
@@ -3089,6 +3115,12 @@ export default function StudentDashboard() {
     id: number;
     title: string;
   }
+  interface Campaign {
+    id: number;
+    campaign_title: string;
+    game_type_title: string;
+  }
+
   const [statsVision, setStatsVision] = useState<PeriodDataVision[]>([]);
   const [groupingVision, setGroupingVision] = useState("daily");
   const [subjectList, setSubjectList] = useState<any[]>([]);
@@ -5235,6 +5267,23 @@ export default function StudentDashboard() {
                           </option>
                         )
                       )}
+                    </select>
+                  </div>
+
+                  <div className="col-md-3 mb-3">
+                    <select
+                      id="campaignSelect"
+                      className="form-select"
+                      value={selectedCampaignId}
+                      onChange={(e) => setSelectedCampaignId(e.target.value)}
+                    >
+                      <option value="">All Campaigns</option>
+                      {campaigns.map((campaign) => (
+                        <option key={campaign.id} value={campaign.id}>
+                          {/* Display campaign title and type for clarity */}
+                          {campaign.campaign_title} ({campaign.game_type_title})
+                        </option>
+                      ))}
                     </select>
                   </div>
 
