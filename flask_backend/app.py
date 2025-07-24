@@ -2141,6 +2141,93 @@ def get_new_school_list():
     finally:
         connection.close()
 
+@app.route('/api/schools_by_state_city', methods=['GET'])
+def get_schools_by_state_city():
+    """
+    Fetch schools filtered by state and city.
+    Query parameters:
+        state (str, optional): The state name.
+        city (str, optional): The city name.
+    Returns:
+        JSON: List of schools matching the criteria.
+              Format: [{'id': '...', 'name': '...', 'code': '...'}, ...]
+    """
+    state = request.args.get('state')
+    city = request.args.get('city')
+
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Base query
+            sql = "SELECT DISTINCT id, name, code FROM lifeapp.schools WHERE 1=1"
+            params = []
+
+            # Add state filter if provided
+            if state:
+                sql += " AND state = %s"
+                params.append(state)
+
+            # Add city filter if provided
+            if city:
+                sql += " AND city = %s"
+                params.append(city)
+
+            # Order results (optional)
+            sql += " ORDER BY name"
+
+            cursor.execute(sql, params)
+            result = cursor.fetchall()
+            return jsonify(result)
+    except Exception as e:
+        # Log the error properly in production
+        print(f"Error fetching schools by state/city: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
+@app.route('/api/schools_by_filters', methods=['POST'])
+def get_schools_by_filters():
+    """
+    Fetch distinct school names, filtered by state and/or city.
+    Expects JSON body with optional 'state' and 'city' keys.
+    Returns:
+        JSON: List of unique school names matching the criteria.
+              Format: [{'name': '...'}, ...]
+    """
+    filters = request.get_json() or {}
+    state = filters.get('state')
+    city = filters.get('city')
+
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Base query to get distinct school names
+            sql = "SELECT DISTINCT name FROM lifeapp.schools WHERE 1=1"
+            params = []
+
+            # Add state filter if provided
+            if state:
+                sql += " AND state = %s"
+                params.append(state)
+
+            # Add city filter if provided
+            if city:
+                sql += " AND city = %s"
+                params.append(city)
+
+            # Order results (optional)
+            sql += " ORDER BY name"
+
+            cursor.execute(sql, params)
+            result = cursor.fetchall()
+            return jsonify(result)
+    except Exception as e:
+        # Log the error properly in production
+        print(f"Error fetching schools by filters: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
 # New endpoint for filtering/searching the mission completes data
 @app.route('/api/student_dashboard_search', methods=['POST'])
 def search():
@@ -8669,6 +8756,8 @@ def create_level():
         vision_text_image_points = data.get('vision_text_image_points', 0)
         vision_mcq_points = data.get('vision_mcq_points', 0)
         status = data.get('status', 1)
+        teacher_assign_points = data.get('teacher_assign_points', 0)
+        teacher_correct_submission_points = data.get('teacher_correct_submission_points', 0)
 
         sql = """
             INSERT INTO lifeapp.la_levels
@@ -8678,7 +8767,8 @@ def create_level():
                quiz_points, quiz_time,
                riddle_points, riddle_time,
                vision_text_image_points, vision_mcq_points,
-               status, created_at)
+               status, created_at,
+               teacher_assign_points, teacher_correct_submission_points)  # NEW COLUMNS
             VALUES
               (%s, %s,
                %s, %s, %s,
@@ -8686,7 +8776,8 @@ def create_level():
                %s, %s,
                %s, %s,
                %s, %s,
-               %s, NOW())
+               %s, NOW(),
+               %s, %s)  # NEW VALUES
         """
 
         params = [
@@ -8703,7 +8794,9 @@ def create_level():
             riddle_time,
             vision_text_image_points,
             vision_mcq_points,
-            status
+            status,
+            teacher_assign_points, 
+            teacher_correct_submission_points 
         ]
 
         print("[CREATE] SQL Query:", sql)
@@ -8750,6 +8843,8 @@ def update_level():
         vision_text_image_points = data.get('vision_text_image_points', 0)
         vision_mcq_points = data.get('vision_mcq_points', 0)
         status = data.get('status', 1)
+        teacher_assign_points = data.get('teacher_assign_points', 0)
+        teacher_correct_submission_points = data.get('teacher_correct_submission_points', 0)
 
         sql = """
             UPDATE lifeapp.la_levels
@@ -8768,7 +8863,9 @@ def update_level():
                 vision_text_image_points = %s,
                 vision_mcq_points = %s,
                 status = %s,
-                updated_at = NOW()
+                updated_at = NOW(),
+                teacher_assign_points = %s,              
+                teacher_correct_submission_points = %s   
             WHERE id = %s
         """
 
@@ -8787,6 +8884,8 @@ def update_level():
             vision_text_image_points,
             vision_mcq_points,
             status,
+            teacher_assign_points,          
+            teacher_correct_submission_points,
             level_id
         ]
 
