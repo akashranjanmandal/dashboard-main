@@ -9121,6 +9121,463 @@ def delete_level():
 
 ###################################################################################
 ###################################################################################
+######################## SETTINGS/NOTIFICATIONA APIs ##############################
+###################################################################################
+###################################################################################
+
+@app.route('/api/notification_users_search_paginated', methods=['POST'])
+def notification_fetch_users_list_paginated():
+    """
+    Fetches paginated users based on search criteria for the notification page.
+    Expects JSON body with filters and pagination params.
+    Returns JSON with users list, total count, current page, total pages, items per page.
+    """
+    data = request.get_json() or {}
+
+    # Filters
+    search = data.get('search', '').strip()
+    state = data.get('state', '').strip()
+    city = data.get('city', '').strip()
+    school_name = data.get('school_name', '').strip() # Changed to school_name
+    grade = data.get('grade', '').strip()
+    user_type = data.get('user_type', 'All Users').strip()
+    specific_user_id = data.get('specific_user_id', '').strip()
+    school_code = data.get('school_code', '').strip()
+
+    # Pagination
+    try:
+        page = int(data.get('page', 1))
+        items_per_page = int(data.get('items_per_page', 10))
+        if page < 1:
+            page = 1
+        if items_per_page < 1:
+            items_per_page = 10
+        elif items_per_page > 100: # Cap items per page
+            items_per_page = 100
+    except (ValueError, TypeError):
+        page = 1
+        items_per_page = 10
+
+    offset = (page - 1) * items_per_page
+
+    connection = None
+    try:
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+
+        cursor = connection.cursor(pymysql.cursors.DictCursor) # Ensure DictCursor
+
+        # --- Base SQL to get user data ---
+        # Use INNER JOIN to ensure we only get users with schools if school filters are applied
+        # LEFT JOIN is used for school name to still show users potentially without a school link,
+        # but filters will handle the specificity.
+        base_sql = """
+            SELECT
+                u.id,
+                u.school_id,
+                u.name,
+                u.guardian_name,
+                u.email,
+                u.username,
+                u.mobile_no,
+                u.type,
+                u.dob,
+                u.gender,
+                u.grade,
+                u.city,
+                u.state,
+                u.address,
+                u.password,
+                u.pin,
+                u.earn_coins,
+                u.heart_coins,
+                u.brain_coins,
+                u.profile_image,
+                u.image_path,
+                u.otp,
+                u.remember_token,
+                u.created_at,
+                u.updated_at,
+                u.device,
+                u.device_token,
+                u.la_board_id,
+                u.la_section_id,
+                u.la_grade_id,
+                u.created_by,
+                u.school_code,
+                u.user_rank,
+                u.board_name,
+                s.name AS school_name
+            FROM lifeapp.users u
+            LEFT JOIN lifeapp.schools s ON u.school_id = s.id
+            WHERE 1=1
+        """
+        count_sql = """
+            SELECT COUNT(*) as total_count
+            FROM lifeapp.users u
+            LEFT JOIN lifeapp.schools s ON u.school_id = s.id
+            WHERE 1=1
+        """
+
+        params = []
+        filters = []
+
+        # --- Apply Filters ---
+
+        # Specific User ID filter (highest priority)
+        if specific_user_id.isdigit():
+            filters.append(" AND u.id = %s")
+            params.append(int(specific_user_id))
+        else:
+            # Apply other filters only if no specific user ID is given
+            if search:
+                search_terms = search.split()
+                if search_terms:
+                    name_conditions = []
+                    for term in search_terms:
+                        name_conditions.append("u.name LIKE %s")
+                        params.append(f"%{term}%")
+                    filters.append(" AND (" + " AND ".join(name_conditions) + ")")
+
+            # User Type filter
+            if user_type == "Student":
+                filters.append(" AND u.type = 3")
+            elif user_type == "Teacher":
+                filters.append(" AND u.type = 2")
+            # "All Users" means no type filter
+
+            # Location and school filters
+            # Use user's state/city if that's the source, otherwise school's
+            if state:
+                filters.append(" AND u.state = %s") # Assuming user table has state
+                params.append(state)
+            if city:
+                filters.append(" AND u.city = %s") # Assuming user table has city
+                params.append(city)
+            if school_name:
+                filters.append(" AND s.name = %s") # Match school name from JOIN
+                params.append(school_name)
+            if school_code:
+                filters.append(" AND u.school_code = %s")
+                params.append(school_code)
+            if grade:
+                filters.append(" AND u.grade = %s")
+                params.append(grade)
+
+        # Combine filters
+        where_clause = "".join(filters)
+        sql_with_filters = base_sql + where_clause + " ORDER BY u.id ASC LIMIT %s OFFSET %s"
+        count_sql_with_filters = count_sql + where_clause
+
+        # --- Execute Count Query ---
+        cursor.execute(count_sql_with_filters, params)
+        total_count_result = cursor.fetchone()
+        total_count = total_count_result['total_count'] if total_count_result else 0
+
+        # --- Execute Main Query with Pagination ---
+        # Add LIMIT and OFFSET parameters
+        query_params = params + [items_per_page, offset]
+        cursor.execute(sql_with_filters, query_params)
+        users_result = cursor.fetchall()
+
+        # Ensure result is a list
+        users_list = users_result if isinstance(users_result, list) else []
+
+        # --- Calculate Pagination ---
+        total_pages = math.ceil(total_count / items_per_page) if items_per_page > 0 else 1
+        if page > total_pages and total_pages > 0:
+            page = total_pages # Adjust page if it went beyond due to filtering
+
+        return jsonify({
+            'users': users_list,
+            'total_count': total_count,
+            'current_page': page,
+            'total_pages': total_pages,
+            'items_per_page': items_per_page
+        })
+
+    except Exception as e:
+        logging.error(f"Error in /api/notification_users_search_paginated: {e}")
+        return jsonify({'error': f'An error occurred while fetching users: {str(e)}'}), 500
+    finally:
+        if connection and connection.open:
+            connection.close()
+
+
+@app.route('/api/notification_users_search_ids', methods=['POST'])
+def notification_fetch_user_ids_list():
+    """
+    Fetches ONLY the IDs of users matching the search criteria.
+    Used for the "Select All Matching" feature.
+    Expects JSON body with filters (no pagination).
+    Returns JSON array of user IDs.
+    """
+    data = request.get_json() or {}
+
+    # Filters (same logic as paginated search, but only select ID)
+    search = data.get('search', '').strip()
+    state = data.get('state', '').strip()
+    city = data.get('city', '').strip()
+    school_name = data.get('school_name', '').strip()
+    grade = data.get('grade', '').strip()
+    user_type = data.get('user_type', 'All Users').strip()
+    specific_user_id = data.get('specific_user_id', '').strip()
+    school_code = data.get('school_code', '').strip()
+
+    connection = None
+    try:
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+
+        cursor = connection.cursor(pymysql.cursors.DictCursor)
+
+        base_sql = """
+            SELECT u.id
+            FROM lifeapp.users u
+            LEFT JOIN lifeapp.schools s ON u.school_id = s.id
+            WHERE 1=1
+        """
+
+        params = []
+        filters = []
+
+        # --- Apply Filters (same as paginated) ---
+
+        if specific_user_id.isdigit():
+            filters.append(" AND u.id = %s")
+            params.append(int(specific_user_id))
+        else:
+            if search:
+                search_terms = search.split()
+                if search_terms:
+                    name_conditions = []
+                    for term in search_terms:
+                        name_conditions.append("u.name LIKE %s")
+                        params.append(f"%{term}%")
+                    filters.append(" AND (" + " AND ".join(name_conditions) + ")")
+
+            if user_type == "Student":
+                filters.append(" AND u.type = 3")
+            elif user_type == "Teacher":
+                filters.append(" AND u.type = 2")
+
+            if state:
+                filters.append(" AND u.state = %s")
+                params.append(state)
+            if city:
+                filters.append(" AND u.city = %s")
+                params.append(city)
+            if school_name:
+                filters.append(" AND s.name = %s")
+                params.append(school_name)
+            if school_code:
+                filters.append(" AND u.school_code = %s")
+                params.append(school_code)
+            if grade:
+                filters.append(" AND u.grade = %s")
+                params.append(grade)
+
+        where_clause = "".join(filters)
+        sql_with_filters = base_sql + where_clause + " ORDER BY u.id ASC"
+
+        cursor.execute(sql_with_filters, params)
+        ids_result = cursor.fetchall()
+
+        # Extract IDs into a list
+        user_ids = [row['id'] for row in ids_result] if ids_result else []
+
+        return jsonify(user_ids)
+
+    except Exception as e:
+        logging.error(f"Error in /api/notification_users_search_ids: {e}")
+        return jsonify({'error': f'An error occurred while fetching user IDs: {str(e)}'}), 500
+    finally:
+        if connection and connection.open:
+            connection.close()
+
+
+# --- Updated Filter Endpoints for Notifications ---
+
+# State list endpoint (No changes needed, but ensure it filters correctly)
+@app.route('/api/notification_state_list_schools', methods=['GET'])
+def notification_get_state_list_schools():
+    """Get distinct states for notification filters."""
+    try:
+        connection = get_db_connection()
+        if not connection:
+             return jsonify({'error': 'Database connection failed'}), 500
+        with connection.cursor() as cursor:
+            # Ensure state is not null/empty and order
+            sql = """
+                SELECT DISTINCT state
+                FROM lifeapp.schools
+                WHERE state IS NOT NULL AND state != ''
+                ORDER BY state
+            """
+            cursor.execute(sql)
+            result = cursor.fetchall()
+            # Filter out any potential None or empty string results again
+            states = [row['state'] for row in result if row['state']]
+        return jsonify(states)
+    except Exception as e:
+        logging.error(f"Error in /api/notification_state_list_schools: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if connection:
+            connection.close()
+
+# City list endpoint with optional state filter (No changes needed)
+@app.route('/api/notification_city_list_schools', methods=['POST'])
+def notification_get_city_list_schools():
+    """Get distinct cities for notification filters, optionally filtered by state."""
+    data = request.json or {}
+    state = data.get('state', '')
+    try:
+        connection = get_db_connection()
+        if not connection:
+             return jsonify({'error': 'Database connection failed'}), 500
+        with connection.cursor() as cursor:
+            sql = """
+                SELECT DISTINCT city
+                FROM lifeapp.schools
+                WHERE city IS NOT NULL AND city != ''
+            """
+            params = []
+            if state:
+                sql += " AND state = %s"
+                params.append(state)
+            sql += " ORDER BY city"
+            cursor.execute(sql, params)
+            result = cursor.fetchall()
+            # Filter out any potential None or empty string results
+            cities = [row['city'] for row in result if row['city']]
+        return jsonify(cities)
+    except Exception as e:
+        logging.error(f"Error in /api/notification_city_list_schools: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if connection:
+            connection.close()
+
+# --- NEW Endpoint: School list by State and City ---
+@app.route('/api/notification_school_list_by_location', methods=['POST'])
+def notification_get_school_list_by_location():
+    """Fetches a list of distinct school names, optionally filtered by state and city."""
+    data = request.get_json() or {}
+    state = data.get('state', '').strip()
+    city = data.get('city', '').strip()
+
+    try:
+        connection = get_db_connection()
+        if not connection:
+             return jsonify({'error': 'Database connection failed'}), 500
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor: # Use DictCursor
+            # Select distinct school names, trimming whitespace
+            sql = "SELECT DISTINCT name FROM lifeapp.schools WHERE name IS NOT NULL AND name != ''"
+            params = []
+
+            # Apply filters if provided
+            if state:
+                sql += " AND state = %s"
+                params.append(state)
+            if city: # Filter by city if provided
+                sql += " AND city = %s"
+                params.append(city)
+
+            sql += " ORDER BY name"
+
+            cursor.execute(sql, params)
+            result = cursor.fetchall()
+            # Process school names: trim and filter
+            # Return a list of trimmed names directly
+            school_names = [
+                str(row['name']).strip() for row in result
+                if row['name'] is not None # Check for None
+            ]
+            # Filter out empty strings after trimming
+            school_names = [name for name in school_names if name]
+
+        return jsonify(school_names)
+    except Exception as e:
+        logging.error(f"Error in /api/notification_school_list_by_location: {e}")
+        # Return empty list on error to prevent dropdown breaking
+        return jsonify([])
+    finally:
+        if connection:
+            connection.close()
+
+# --- Endpoint to send notification via external API (No changes) ---
+@app.route('/api/notification_send', methods=['POST'])
+def notification_send():
+    """
+    Sends a notification to selected users via the external API.
+    Expects JSON: {
+        "user_ids": [1, 2, 3],
+        "title": "Notification Title",
+        "message": "Notification Message"
+    }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid JSON data'}), 400
+
+    user_ids = data.get('user_ids')
+    title = data.get('title')
+    message = data.get('message')
+
+    # Validate input
+    if not isinstance(user_ids, list) or not all(isinstance(uid, int) for uid in user_ids):
+        return jsonify({'error': 'Invalid user_ids format. Must be a list of integers.'}), 400
+    if not title or not isinstance(title, str):
+        return jsonify({'error': 'Invalid or missing title'}), 400
+    if not message or not isinstance(message, str):
+        return jsonify({'error': 'Invalid or missing message'}), 400
+
+    if not user_ids:
+        return jsonify({'error': 'No user IDs provided'}), 400
+
+    NOTIFICATION_API_ENDPOINT = "https://api.life-lab.org/v3/admin/send-notification"
+    payload = {
+        "user_ids": user_ids,
+        "title": title,
+        "message": message
+    }
+
+    try:
+        # Make the request to the external notification API
+        # Add headers like Authorization if needed
+        response = requests.post(
+            NOTIFICATION_API_ENDPOINT,
+            json=payload,
+            timeout=30 # Add a timeout
+            # headers={'Authorization': 'Bearer YOUR_TOKEN_HERE'} # Add if auth is needed
+        )
+        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+
+        # Return the response from the external API to the frontend
+        try:
+            api_response_data = response.json()
+        except ValueError:
+            # If response is not JSON, return the text
+            api_response_data = {"message": response.text}
+
+        return jsonify(api_response_data), response.status_code
+
+    except requests.exceptions.RequestException as e:
+        # Handle network errors, timeouts, etc.
+        logging.error(f"Error calling external notification API: {e}")
+        return jsonify({'error': f'Failed to send notification: {str(e)}'}), 500
+    except Exception as e:
+        # Handle other unexpected errors
+        logging.error(f"Unexpected error in /api/notification_send: {e}")
+        return jsonify({'error': 'An unexpected error occurred'}), 500
+
+# --- End of additions to app.py ---
+
+###################################################################################
+###################################################################################
 ######################## SETTINGS/LANGUAGES APIs ###################################
 ###################################################################################
 ###################################################################################
