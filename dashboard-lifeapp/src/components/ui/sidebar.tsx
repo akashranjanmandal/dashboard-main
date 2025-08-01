@@ -374,6 +374,11 @@ export function Sidebar() {
               <NavItem href="/settings/category" label="Category" isNested />
               <NavItem href="/settings/coupons" label="Coupons" isNested />
               <NavItem
+                href="/settings/notifications"
+                label="Notifications"
+                isNested
+              />
+              <NavItem
                 href="/settings/activity_types"
                 label="Activity Types"
                 isNested
