@@ -844,7 +844,7 @@ export default function NotificationPage() {
                   {/* --- End of User Type Filter Replacement --- */}
 
                   {/* Specific User ID Filter */}
-                  <div className="col-12 col-md-6 col-lg-3">
+                  {/* <div className="col-12 col-md-6 col-lg-3">
                     <input
                       type="text"
                       className="form-control"
@@ -852,7 +852,7 @@ export default function NotificationPage() {
                       value={specificUserId}
                       onChange={(e) => setSpecificUserId(e.target.value)}
                     />
-                  </div>
+                  </div> */}
                   {/* State Filter */}
                   <div className="col-12 col-md-6 col-lg-3">
                     <SearchableDropdown
