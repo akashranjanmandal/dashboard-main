@@ -2898,7 +2898,8 @@ def fetch_coupon_redeem_list():
             cr.coins AS 'Coins Redeemed', 
             u.school_code AS 'School Code',
             cr.user_id, 
-            cr.created_at AS 'Coupon Redeemed Date' 
+            cr.created_at AS 'Coupon Redeemed Date',
+            cr.status AS 'status' -- Added status column
         FROM lifeapp.coupon_redeems cr 
         INNER JOIN lifeapp.users u ON u.id = cr.user_id 
         INNER JOIN lifeapp.schools ls ON ls.id = u.school_id
@@ -4766,7 +4767,8 @@ def fetch_teacher_coupon_redeem_list():
             lc.title as 'Coupon Title', 
             cr.coins AS 'Coins Redeemed', 
             cr.user_id, 
-            cr.created_at AS 'Coupon Redeemed Date' 
+            cr.created_at AS 'Coupon Redeemed Date',
+            cr.status AS 'status'
         FROM lifeapp.coupon_redeems cr 
         INNER JOIN lifeapp.users u ON u.id = cr.user_id 
         INNER JOIN lifeapp.schools ls ON ls.id = u.school_id
@@ -9508,15 +9510,18 @@ def notification_get_school_list_by_location():
         if connection:
             connection.close()
 
-# --- Endpoint to send notification via external API (No changes) ---
+# --- Endpoint to send notification via external API  ---
 @app.route('/api/notification_send', methods=['POST'])
 def notification_send():
     """
     Sends a notification to selected users via the external API.
+    If a coupon_id is provided, updates the status in coupon_redeems to 'Gift Card Sent'
+    for the matching user_ids and coupon_id entries that were in 'Processing' status.
     Expects JSON: {
         "user_ids": [1, 2, 3],
         "title": "Notification Title",
-        "message": "Notification Message"
+        "message": "Notification Message",
+        "coupon_id": 5 (optional)
     }
     """
     data = request.get_json()
@@ -9526,6 +9531,7 @@ def notification_send():
     user_ids = data.get('user_ids')
     title = data.get('title')
     message = data.get('message')
+    coupon_id = data.get('coupon_id') # Optional field
 
     # Validate input
     if not isinstance(user_ids, list) or not all(isinstance(uid, int) for uid in user_ids):
@@ -9534,47 +9540,265 @@ def notification_send():
         return jsonify({'error': 'Invalid or missing title'}), 400
     if not message or not isinstance(message, str):
         return jsonify({'error': 'Invalid or missing message'}), 400
-
     if not user_ids:
         return jsonify({'error': 'No user IDs provided'}), 400
+    if coupon_id is not None and not isinstance(coupon_id, int):
+         return jsonify({'error': 'Invalid coupon_id format. Must be an integer if provided.'}), 400
 
     NOTIFICATION_API_ENDPOINT = "https://api.life-lab.org/v3/admin/send-notification"
+    # Include coupon_id in the payload if it exists
     payload = {
         "user_ids": user_ids,
         "title": title,
         "message": message
     }
+    if coupon_id is not None:
+        payload["coupon_id"] = coupon_id
 
+    connection = None
     try:
-        # Make the request to the external notification API
-        # Add headers like Authorization if needed
         response = requests.post(
             NOTIFICATION_API_ENDPOINT,
             json=payload,
-            timeout=30 # Add a timeout
-            # headers={'Authorization': 'Bearer YOUR_TOKEN_HERE'} # Add if auth is needed
+            timeout=30
+            # headers={'Authorization': 'Bearer YOUR_TOKEN_HERE'}
         )
-        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
-
-        # Return the response from the external API to the frontend
+        response.raise_for_status()
         try:
             api_response_data = response.json()
         except ValueError:
-            # If response is not JSON, return the text
             api_response_data = {"message": response.text}
 
-        return jsonify(api_response_data), response.status_code
+        # --- New Logic: Update coupon_redeems status if notification sent successfully and coupon_id provided ---
+        # This runs *after* the external API call succeeds.
+        if coupon_id is not None and user_ids:
+            connection = get_db_connection()
+            if connection:
+                try:
+                    with connection.cursor() as cursor:
+                        # Update status to 'Gift Card Sent' for the specific user_ids and coupon_id
+                        # where the current status is 'Processing'.
+                        # Use a placeholder for each user_id to prevent SQL injection.
+                        placeholders = ','.join(['%s'] * len(user_ids))
+                        update_sql = f"""
+                            UPDATE lifeapp.coupon_redeems
+                            SET status = 'Gift Card Sent', status_updated_at = NOW()
+                            WHERE coupon_id = %s
+                            AND user_id IN ({placeholders})
+                            AND status = 'Processing'
+                        """
+                        # Parameters: coupon_id, followed by all user_ids
+                        update_params = [coupon_id] + user_ids
+                        rows_affected = cursor.execute(update_sql, update_params)
+                        connection.commit()
+                        logging.info(f"Updated {rows_affected} rows in coupon_redeems to 'Gift Card Sent' for coupon_id {coupon_id} and selected users.")
+                except Exception as db_error:
+                    logging.error(f"Error updating coupon_redeems status: {db_error}")
+                    # Note: Even if DB update fails, we still consider the notification sent.
+                    # You might want to log this or handle it differently based on requirements.
+                finally:
+                    connection.close()
 
+        return jsonify(api_response_data), response.status_code
     except requests.exceptions.RequestException as e:
-        # Handle network errors, timeouts, etc.
         logging.error(f"Error calling external notification API: {e}")
         return jsonify({'error': f'Failed to send notification: {str(e)}'}), 500
     except Exception as e:
-        # Handle other unexpected errors
         logging.error(f"Unexpected error in /api/notification_send: {e}")
         return jsonify({'error': 'An unexpected error occurred'}), 500
+    finally:
+        # Ensure connection is closed if it was opened outside the request exception block
+        if connection and connection.open:
+            connection.close()
 
-# --- End of additions to app.py ---
+# --- New Routes ---
+
+# --- New Endpoint: Fetch Users by IDs (for Modal Fix) ---
+@app.route('/api/notification_get_users_by_ids', methods=['POST'])
+def notification_get_users_by_ids():
+    """
+    Fetches full user details for a list of user IDs.
+    Expects JSON: { "user_ids": [1, 2, 3] }
+    Returns JSON array of user objects.
+    """
+    data = request.get_json() or {}
+    user_ids = data.get('user_ids', [])
+
+    if not isinstance(user_ids, list) or not all(isinstance(uid, int) for uid in user_ids):
+        return jsonify({'error': 'Invalid user_ids format. Must be a list of integers.'}), 400
+
+    if not user_ids:
+        return jsonify([])
+
+    placeholders = ','.join(['%s'] * len(user_ids))
+    sql = f"""
+        SELECT
+            u.id,
+            u.school_id,
+            u.name,
+            u.guardian_name,
+            u.email,
+            u.username,
+            u.mobile_no,
+            u.type,
+            u.dob,
+            u.gender,
+            u.grade,
+            u.city,
+            u.state,
+            u.address,
+            u.password,
+            u.pin,
+            u.earn_coins,
+            u.heart_coins,
+            u.brain_coins,
+            u.profile_image,
+            u.image_path,
+            u.otp,
+            u.remember_token,
+            u.created_at,
+            u.updated_at,
+            u.device,
+            u.device_token,
+            u.la_board_id,
+            u.la_section_id,
+            u.la_grade_id,
+            u.created_by,
+            u.school_code,
+            u.user_rank,
+            u.board_name,
+            s.name AS school_name
+        FROM lifeapp.users u
+        LEFT JOIN lifeapp.schools s ON u.school_id = s.id
+        WHERE u.id IN ({placeholders})
+        ORDER BY u.id ASC
+    """
+
+    connection = None
+    try:
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(sql, user_ids)
+            users = cursor.fetchall() or []
+        return jsonify(users)
+
+    except Exception as e:
+        logging.error(f"Error in /api/notification_get_users_by_ids: {e}")
+        return jsonify({'error': f'An error occurred while fetching users: {str(e)}'}), 500
+    finally:
+        if connection and connection.open:
+            connection.close()
+
+# --- New Endpoint: Get Active Coupons ---
+@app.route('/api/notification_get_active_coupons', methods=['GET'])
+def notification_get_active_coupons():
+    """Fetches all coupons with status = 1."""
+    connection = None
+    try:
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            sql = "SELECT id, title, status FROM lifeapp.coupons WHERE status = 1 ORDER BY title ASC"
+            cursor.execute(sql)
+            coupons = cursor.fetchall() or []
+        return jsonify(coupons)
+
+    except Exception as e:
+        logging.error(f"Error in /api/notification_get_active_coupons: {e}")
+        return jsonify({'error': f'An error occurred while fetching coupons: {str(e)}'}), 500
+    finally:
+        if connection and connection.open:
+            connection.close()
+
+# --- New Endpoint: Check Coupon Redemption ---
+@app.route('/api/notification_check_coupon_redemption', methods=['POST'])
+def notification_check_coupon_redemption():
+    """
+    Checks if all selected users have redeemed the specified coupon.
+    Expects JSON: {
+        "user_ids": [1, 2, 3],
+        "coupon_id": 5
+    }
+    Returns:
+        - Success (200): { "success": true } if all users have redeemed the coupon.
+        - Failure (200): { "success": false, "coupon_title": "...", "non_redeeming_users": ["Name1", "Name2"] }
+        - Error (4xx/5xx): { "error": "..." } if input is invalid or an error occurs.
+    """
+    data = request.get_json() or {}
+    user_ids = data.get('user_ids', [])
+    coupon_id = data.get('coupon_id')
+
+    # Validate input
+    if not isinstance(user_ids, list) or not all(isinstance(uid, int) for uid in user_ids):
+        return jsonify({'error': 'Invalid user_ids format. Must be a list of integers.'}), 400
+    if not user_ids:
+        return jsonify({'error': 'No user IDs provided.'}), 400
+    if not isinstance(coupon_id, int):
+        return jsonify({'error': 'Invalid or missing coupon_id. Must be an integer.'}), 400
+
+    connection = None
+    try:
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            # 1. Check if the coupon exists and is active
+            cursor.execute("SELECT id, title FROM lifeapp.coupons WHERE id = %s AND status = 1", (coupon_id,))
+            coupon_result = cursor.fetchone()
+            if not coupon_result:
+                 return jsonify({'error': f'Coupon with ID {coupon_id} not found or not active.'}), 404
+            coupon_title = coupon_result['title']
+
+            # 2. Get the list of user IDs who have redeemed this specific coupon
+            placeholders = ','.join(['%s'] * len(user_ids))
+            sql_redeemed_users = f"""
+                SELECT DISTINCT user_id
+                FROM lifeapp.coupon_redeems
+                WHERE coupon_id = %s AND user_id IN ({placeholders})
+            """
+            cursor.execute(sql_redeemed_users, [coupon_id] + user_ids)
+            redeemed_user_ids = [row['user_id'] for row in cursor.fetchall()]
+
+            # 3. Find user IDs that are NOT in the redeemed list
+            unredeemed_user_ids = list(set(user_ids) - set(redeemed_user_ids))
+
+            # 4. If all users have redeemed, return success
+            if not unredeemed_user_ids:
+                return jsonify({
+                    "success": True,
+                    "message": f"All selected users have redeemed coupon '{coupon_title}'."
+                })
+
+            # 5. If some users haven't redeemed, get their names and return failure
+            unredeemed_placeholders = ','.join(['%s'] * len(unredeemed_user_ids))
+            sql_user_names = f"SELECT id, name FROM lifeapp.users WHERE id IN ({unredeemed_placeholders})"
+            cursor.execute(sql_user_names, unredeemed_user_ids)
+            unredeemed_users_dict = {row['id']: row['name'] for row in cursor.fetchall()}
+
+            # Build list of names (handle potential missing names gracefully)
+            unredeemed_names = [unredeemed_users_dict.get(uid, f"User {uid}") for uid in unredeemed_user_ids]
+
+            return jsonify({
+                "success": False,
+                "coupon_title": coupon_title,
+                "non_redeeming_users": unredeemed_names
+            })
+
+    except Exception as e:
+        logging.error(f"Error in /api/notification_check_coupon_redemption: {e}")
+        return jsonify({'error': f'An error occurred during the redemption check: {str(e)}'}), 500
+    finally:
+        if connection and connection.open:
+            connection.close()
+
+
+
 
 ###################################################################################
 ###################################################################################
