@@ -598,6 +598,7 @@ export default function CouponsRedeemed() {
       "Grade",
       "Coupon Title",
       "Coins Redeemed",
+      "Status",
       "School Code",
       "User ID",
       "Coupon Redeemed Date",
@@ -616,6 +617,7 @@ export default function CouponsRedeemed() {
         coupon.grade || "",
         coupon["Coupon Title"] || "",
         coupon["Coins Redeemed"] || "",
+        (coupon as any).status || "",
         coupon["School Code"] || "",
         coupon.user_id,
         coupon["Coupon Redeemed Date"] || "",
@@ -945,6 +947,7 @@ export default function CouponsRedeemed() {
                           <th>Grade</th>
                           <th>Coupon Title</th>
                           <th>Coins Redeemed</th>
+                          <th>Status</th>
                           <th>School Code</th>
                           <th>User ID</th>
                           <th>Redeemed Date</th>
@@ -971,6 +974,7 @@ export default function CouponsRedeemed() {
                               <td>{coupon.grade}</td>
                               <td>{coupon["Coupon Title"]}</td>
                               <td>{coupon["Coins Redeemed"]}</td>
+                              <td>{(coupon as any).status || "-"}</td>
                               <td>{coupon["School Code"]}</td>
                               <td>{coupon.user_id}</td>
                               <td>
