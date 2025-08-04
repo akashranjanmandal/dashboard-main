@@ -16,7 +16,7 @@ import {
 } from "@tabler/icons-react";
 import { ChevronDown } from "lucide-react";
 
-// Define the User interface based on your provided data example
+// --- Interfaces ---
 interface User {
   id: number;
   school_id: number | null;
@@ -25,7 +25,7 @@ interface User {
   email: string | null;
   username: string | null;
   mobile_no: string | null;
-  type: number | null; // 3 for student?
+  type: number | null;
   dob: string | null;
   gender: string | null;
   grade: string | null;
@@ -52,22 +52,28 @@ interface User {
   school_code: string | null;
   user_rank: number | null;
   board_name: string | null;
-  // Add school name if it's included in the API response
   school_name?: string;
 }
 
-// Define the response structure from the backend
 interface PaginatedUsersResponse {
   users: User[];
-  total_count: number; // Total matching records
+  total_count: number;
   current_page: number;
   total_pages: number;
   items_per_page: number;
 }
 
+interface Coupon {
+  id: number;
+  title: string;
+  status: number;
+}
+
+// --- Constants ---
 // const api_startpoint = "http://localhost:5000";
 const api_startpoint = "http://152.42.239.141:5000";
 
+// --- SearchableDropdown Component ---
 function SearchableDropdown({
   options,
   placeholder,
@@ -245,6 +251,7 @@ function SearchableDropdown({
   );
 }
 
+// --- Main Component ---
 export default function NotificationPage() {
   const [isClient, setIsClient] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
@@ -257,9 +264,9 @@ export default function NotificationPage() {
   const [cities, setCities] = useState<string[]>([]);
   const [isCitiesLoading, setIsCitiesLoading] = useState(false);
   const [selectedCity, setSelectedCity] = useState("");
-  const [schools, setSchools] = useState<string[]>([]); // Stores school names
+  const [schools, setSchools] = useState<string[]>([]);
   const [isSchoolsLoading, setIsSchoolsLoading] = useState(false);
-  const [selectedSchool, setSelectedSchool] = useState(""); // Stores selected school name
+  const [selectedSchool, setSelectedSchool] = useState("");
   const [grades] = useState<string[]>(
     Array.from({ length: 12 }, (_, i) => (i + 1).toString())
   );
@@ -273,11 +280,11 @@ export default function NotificationPage() {
   const [selectedUserIds, setSelectedUserIds] = useState<Set<number>>(
     new Set()
   );
-  const [selectAll, setSelectAll] = useState(false); // Select all on current page
-  const [selectAllMatching, setSelectAllMatching] = useState(false); // New state for global select
-  const [totalCount, setTotalCount] = useState(0); // Total matching records
+  const [selectAll, setSelectAll] = useState(false);
+  const [selectAllMatching, setSelectAllMatching] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
 
-  // Modal State
+  // --- Modal States ---
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [notificationTitle, setNotificationTitle] = useState("");
   const [notificationMessage, setNotificationMessage] = useState("");
@@ -286,7 +293,28 @@ export default function NotificationPage() {
   const [modalCurrentPage, setModalCurrentPage] = useState(1);
   const modalItemsPerPage = 5;
 
-  // --- Fetch States (No changes) ---
+  // --- New States for Coupon Feature ---
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [isCouponsLoading, setIsCouponsLoading] = useState(false);
+  const [selectedCouponId, setSelectedCouponId] = useState<number | null>(null); // Use null for "None"
+  const [isCheckingRedemption, setIsCheckingRedemption] = useState(false); // New state for redemption check
+  const [isErrorModalOpen, setIsErrorModalOpen] = useState(false); // State for error modal
+  const [errorModalMessage, setErrorModalMessage] = useState(""); // Message for error modal
+  const [errorModalUserNames, setErrorModalUserNames] = useState<string[]>([]); // User names for error modal
+
+  // --- Modal Pagination (for selected users list) ---
+  const [modalSelectedUsers, setModalSelectedUsers] = useState<User[]>([]); // State for users fetched for modal
+  const modalTotalPages = Math.ceil(
+    modalSelectedUsers.length / modalItemsPerPage
+  );
+  const modalIndexOfLastItem = modalCurrentPage * modalItemsPerPage;
+  const modalIndexOfFirstItem = modalIndexOfLastItem - modalItemsPerPage;
+  const modalCurrentItems = modalSelectedUsers.slice(
+    modalIndexOfFirstItem,
+    modalIndexOfLastItem
+  );
+
+  // --- Fetch States ---
   useEffect(() => {
     async function fetchStates() {
       const cachedStates = sessionStorage.getItem("notification_stateList");
@@ -294,7 +322,7 @@ export default function NotificationPage() {
         try {
           const parsed = JSON.parse(cachedStates);
           if (Array.isArray(parsed)) {
-            setStates(parsed.filter((s) => s)); // Filter out falsy values like empty strings or null
+            setStates(parsed.filter((s) => s));
             return;
           }
         } catch (err) {
@@ -308,7 +336,7 @@ export default function NotificationPage() {
         );
         const data = await res.json();
         if (Array.isArray(data)) {
-          const stateList = data.filter((state) => state); // Filter out falsy values
+          const stateList = data.filter((state) => state);
           setStates(stateList);
           sessionStorage.setItem(
             "notification_stateList",
@@ -325,7 +353,7 @@ export default function NotificationPage() {
     fetchStates();
   }, []);
 
-  // --- Fetch Cities based on State ---
+  // --- Fetch Cities ---
   const fetchCities = async (state: string) => {
     setIsCitiesLoading(true);
     try {
@@ -339,7 +367,6 @@ export default function NotificationPage() {
       );
       if (!res.ok) throw new Error(`HTTP error! Status: ${res.status}`);
       const data = await res.json();
-      // Ensure data is an array and filter out falsy values
       const cityList = Array.isArray(data) ? data.filter((city) => city) : [];
       setCities(cityList);
     } catch (error) {
@@ -350,19 +377,18 @@ export default function NotificationPage() {
     }
   };
 
-  // Effect to fetch cities when state changes
   useEffect(() => {
-    setSelectedCity(""); // Reset city selection
-    setSelectedSchool(""); // Reset school selection
-    setSchools([]); // Clear school list
+    setSelectedCity("");
+    setSelectedSchool("");
+    setSchools([]);
     if (selectedState) {
       fetchCities(selectedState);
     } else {
-      fetchCities(""); // Fetch all cities if no state selected
+      fetchCities("");
     }
   }, [selectedState]);
 
-  // --- Fetch Schools based on State and City ---
+  // --- Fetch Schools ---
   const fetchSchools = async (state: string, city: string) => {
     setIsSchoolsLoading(true);
     try {
@@ -376,9 +402,7 @@ export default function NotificationPage() {
       );
       if (!res.ok) throw new Error(`HTTP error! Status: ${res.status}`);
       const data = await res.json();
-      // Ensure data is an array and process school names
       if (Array.isArray(data)) {
-        // Filter out non-string values and empty strings, then trim
         const processedSchools = data
           .filter((item: any) => typeof item === "string" && item.trim() !== "")
           .map((item: string) => item.trim());
@@ -394,43 +418,59 @@ export default function NotificationPage() {
     }
   };
 
-  // Effect to fetch schools when state or city changes
   useEffect(() => {
-    setSelectedSchool(""); // Reset school selection when location filters change
+    setSelectedSchool("");
     if (selectedState || selectedCity) {
-      // Fetch if either state or city is selected
       fetchSchools(selectedState, selectedCity);
     } else {
-      // Optionally, fetch all schools if no filters
-      // fetchSchools("", "");
-      setSchools([]); // Or clear list
+      setSchools([]);
     }
-  }, [selectedState, selectedCity]); // Depend on both state and city
+  }, [selectedState, selectedCity]);
+
+  // --- Fetch Active Coupons ---
+  useEffect(() => {
+    async function fetchCoupons() {
+      setIsCouponsLoading(true);
+      try {
+        const res = await fetch(
+          `${api_startpoint}/api/notification_get_active_coupons`
+        );
+        if (!res.ok) throw new Error(`HTTP error! Status: ${res.status}`);
+        const data: Coupon[] = await res.json();
+        setCoupons(data);
+      } catch (error) {
+        console.error("Error fetching coupons:", error);
+        setCoupons([]);
+      } finally {
+        setIsCouponsLoading(false);
+      }
+    }
+    fetchCoupons();
+  }, []);
 
   useEffect(() => {
     setIsClient(true);
-    // Initial fetch - Corrected number of arguments
-    fetchUsers("", "", "", "", "", "All Users", "", "", 1, itemsPerPage); // Pass page 1
+    fetchUsers("", "", "", "", "", "All Users", "", "", 1, itemsPerPage);
   }, []);
 
-  // --- Updated fetchUsers to handle pagination and total count ---
+  // --- Fetch Paginated Users ---
   const fetchUsers = async (
     query: string,
     state: string,
     city: string,
-    school: string, // This is now school name
+    school: string,
     grade: string,
     userType: string,
     specificUserId: string,
     schoolCode: string,
-    page: number, // Add page parameter
-    perPage: number // Add perPage parameter
+    page: number,
+    perPage: number
   ) => {
     setLoading(true);
     setError(null);
     try {
       const response = await fetch(
-        `${api_startpoint}/api/notification_users_search_paginated`, // Updated endpoint
+        `${api_startpoint}/api/notification_users_search_paginated`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -438,13 +478,13 @@ export default function NotificationPage() {
             search: query,
             state: state,
             city: city,
-            school_name: school, // Send school name
+            school_name: school,
             grade: grade,
             user_type: userType,
             specific_user_id: specificUserId,
             school_code: schoolCode,
-            page: page, // Send page
-            items_per_page: perPage, // Send items per page
+            page: page,
+            items_per_page: perPage,
           }),
         }
       );
@@ -453,7 +493,6 @@ export default function NotificationPage() {
         throw new Error(`Network response was not ok: ${errorText}`);
       }
       const paginatedData: PaginatedUsersResponse = await response.json();
-
       setUsers(paginatedData.users);
       setTotalCount(paginatedData.total_count);
     } catch (error) {
@@ -462,7 +501,7 @@ export default function NotificationPage() {
       console.error("Fetch Users Error:", error);
       setError(errorMessage);
       setUsers([]);
-      setTotalCount(0); // Reset total count on error
+      setTotalCount(0);
     } finally {
       setLoading(false);
     }
@@ -470,7 +509,6 @@ export default function NotificationPage() {
 
   const handleSearch = () => {
     setCurrentPage(1);
-    // Reset selections when filters/search changes
     setSelectedUserIds(new Set());
     setSelectAll(false);
     setSelectAllMatching(false);
@@ -483,7 +521,7 @@ export default function NotificationPage() {
       selectedUserType,
       specificUserId,
       schoolCodeInput,
-      1, // Start from page 1
+      1,
       itemsPerPage
     );
   };
@@ -502,14 +540,12 @@ export default function NotificationPage() {
     setSpecificUserId("");
     setSchoolCodeInput("");
     setCurrentPage(1);
-    // Reset selections when filters/search changes
     setSelectedUserIds(new Set());
     setSelectAll(false);
     setSelectAllMatching(false);
     fetchUsers("", "", "", "", "", "All Users", "", "", 1, itemsPerPage);
   };
 
-  // --- Handle Page Change ---
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
     fetchUsers(
@@ -524,7 +560,6 @@ export default function NotificationPage() {
       newPage,
       itemsPerPage
     );
-    // DO NOT reset selectedUserIds on page change
   };
 
   const handleCheckboxChange = (userId: number) => {
@@ -535,14 +570,11 @@ export default function NotificationPage() {
       } else {
         newSet.add(userId);
       }
-      // Update selectAll based on whether all displayed items are selected
       const allDisplayedIds = currentItems.map((u) => u.id);
       const allSelected =
         allDisplayedIds.length > 0 &&
         allDisplayedIds.every((id) => newSet.has(id));
       setSelectAll(allSelected);
-
-      // If deselecting one, global select is definitely false
       if (newSet.has(userId)) {
         setSelectAllMatching(false);
       }
@@ -550,17 +582,14 @@ export default function NotificationPage() {
     });
   };
 
-  // --- Handle Select All on Current Page ---
   const handleSelectAllChange = () => {
     if (selectAll) {
-      // Deselect all currently displayed items
       setSelectedUserIds((prev) => {
         const newSet = new Set(prev);
         currentItems.forEach((item) => newSet.delete(item.id));
         return newSet;
       });
     } else {
-      // Select all currently displayed items
       setSelectedUserIds((prev) => {
         const newSet = new Set(prev);
         currentItems.forEach((item) => newSet.add(item.id));
@@ -568,20 +597,15 @@ export default function NotificationPage() {
       });
     }
     setSelectAll(!selectAll);
-    // Deselecting global select if user interacts with page select
     setSelectAllMatching(false);
   };
 
-  // --- Handle Select All Matching Records (New Functionality) ---
   const handleSelectAllMatchingChange = async () => {
     if (selectAllMatching) {
-      // Deselect all - clear the set
       setSelectedUserIds(new Set());
-      setSelectAll(false); // Also deselect page select
+      setSelectAll(false);
     } else {
-      // Select all matching - This requires a backend call to get IDs
       try {
-        // Call a new endpoint to get all matching user IDs
         const response = await fetch(
           `${api_startpoint}/api/notification_users_search_ids`,
           {
@@ -596,14 +620,13 @@ export default function NotificationPage() {
               user_type: selectedUserType,
               specific_user_id: specificUserId,
               school_code: schoolCodeInput,
-              // No pagination needed for IDs
             }),
           }
         );
         if (!response.ok) throw new Error("Failed to fetch user IDs");
-        const userIds: number[] = await response.json(); // Expect array of IDs
+        const userIds: number[] = await response.json();
         setSelectedUserIds(new Set(userIds));
-        setSelectAll(false); // Deselect page select
+        setSelectAll(false);
       } catch (err) {
         console.error("Error fetching all matching user IDs:", err);
         alert(
@@ -615,14 +638,42 @@ export default function NotificationPage() {
     setSelectAllMatching(!selectAllMatching);
   };
 
-  const openNotificationModal = () => {
+  // --- New Function: Fetch Users for Modal ---
+  const fetchUsersForModal = async (userIds: number[]) => {
+    try {
+      const response = await fetch(
+        `${api_startpoint}/api/notification_get_users_by_ids`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_ids: userIds }),
+        }
+      );
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Network response was not ok: ${errorText}`);
+      }
+      const usersData: User[] = await response.json();
+      setModalSelectedUsers(usersData);
+      setModalCurrentPage(1); // Reset modal pagination
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error occurred";
+      console.error("Fetch Users for Modal Error:", error);
+      setSendError(`Error loading selected users: ${errorMessage}`);
+      setModalSelectedUsers([]);
+    }
+  };
+
+  const openNotificationModal = async () => {
     if (selectedUserIds.size === 0) {
       alert("Please select at least one user.");
       return;
     }
     setIsModalOpen(true);
     setSendError(null);
-    setModalCurrentPage(1); // Reset modal pagination
+    // --- Fetch full user details for the modal ---
+    await fetchUsersForModal(Array.from(selectedUserIds));
   };
 
   const closeNotificationModal = () => {
@@ -630,28 +681,98 @@ export default function NotificationPage() {
     setNotificationTitle("");
     setNotificationMessage("");
     setSendError(null);
+    setSelectedCouponId(null); // Reset coupon selection
+    // Clear modal user data
+    setModalSelectedUsers([]);
+    setModalCurrentPage(1);
   };
 
+  // --- New Function: Check Coupon Redemption ---
+  const checkCouponRedemption = async () => {
+    if (!selectedCouponId || selectedCouponId <= 0) {
+      // If "None" is selected, proceed directly to sending
+      handleSendNotification();
+      return;
+    }
+
+    setIsCheckingRedemption(true);
+    setSendError(null);
+    try {
+      const userIdsArray = Array.from(selectedUserIds);
+      const response = await fetch(
+        `${api_startpoint}/api/notification_check_coupon_redemption`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_ids: userIdsArray,
+            coupon_id: selectedCouponId,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        // Handle error from backend (e.g., coupon not found)
+        throw new Error(
+          result.error || `Redemption check failed: ${response.status}`
+        );
+      }
+
+      if (result.success === false) {
+        // Redemption check failed - show error modal
+        setErrorModalMessage(
+          `"${result.coupon_title}" hasn't been redeemed by:`
+        );
+        setErrorModalUserNames(result.non_redeeming_users || []); // Expecting names from backend
+        setIsErrorModalOpen(true);
+        return; // Stop the process
+      }
+
+      // If check passes, proceed to send notification
+      handleSendNotification();
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "An unknown error occurred during the check.";
+      console.error("Coupon Redemption Check Error:", error);
+      setSendError(`Redemption Check Error: ${errorMessage}`);
+    } finally {
+      setIsCheckingRedemption(false);
+    }
+  };
+
+  // --- Modified: Handle Send Notification (now called by checkCouponRedemption) ---
   const handleSendNotification = async () => {
     if (!notificationTitle.trim() || !notificationMessage.trim()) {
       setSendError("Please enter both title and message.");
       return;
     }
-
     setIsSending(true);
     setSendError(null);
     try {
       const userIdsArray = Array.from(selectedUserIds);
+      const payload: {
+        user_ids: number[];
+        title: string;
+        message: string;
+        coupon_id?: number;
+      } = {
+        user_ids: userIdsArray,
+        title: notificationTitle,
+        message: notificationMessage,
+      };
+      // Include coupon_id if a valid one is selected
+      if (selectedCouponId && selectedCouponId > 0) {
+        payload.coupon_id = selectedCouponId;
+      }
+
       const response = await fetch(`${api_startpoint}/api/notification_send`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          user_ids: userIdsArray,
-          title: notificationTitle,
-          message: notificationMessage,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -666,7 +787,7 @@ export default function NotificationPage() {
       console.log("Notification sent successfully:", result);
       alert("Notification sent successfully!");
       closeNotificationModal();
-      setSelectedUserIds(new Set()); // Clear selections
+      setSelectedUserIds(new Set());
       setSelectAll(false);
       setSelectAllMatching(false);
     } catch (error) {
@@ -683,22 +804,9 @@ export default function NotificationPage() {
 
   // --- Pagination calculations ---
   const totalPages = Math.ceil(totalCount / itemsPerPage);
-  const currentItems = users; // Users are now paginated from backend
+  const currentItems = users;
 
-  // --- Modal Pagination (No changes) ---
-  const modalSelectedUsers = Array.from(selectedUserIds)
-    .map((id) => users.find((u) => u.id === id) || { id, name: `User ${id}` })
-    .filter((u) => u) as User[]; // Fallback name if not in current page
-  const modalIndexOfLastItem = modalCurrentPage * modalItemsPerPage;
-  const modalIndexOfFirstItem = modalIndexOfLastItem - modalItemsPerPage;
-  const modalCurrentItems = modalSelectedUsers.slice(
-    modalIndexOfFirstItem,
-    modalIndexOfLastItem
-  );
-  const modalTotalPages = Math.ceil(
-    modalSelectedUsers.length / modalItemsPerPage
-  );
-
+  // --- Pagination Controls Component ---
   const PaginationControls = ({
     currentPage,
     totalPages,
@@ -725,7 +833,7 @@ export default function NotificationPage() {
           onChange={(e) => {
             const newItemsPerPage = Number(e.target.value);
             setItemsPerPage(newItemsPerPage);
-            setCurrentPage(1); // Reset to first page when changing items per page
+            setCurrentPage(1);
             fetchUsers(
               searchTerm,
               selectedState,
@@ -735,7 +843,7 @@ export default function NotificationPage() {
               selectedUserType,
               specificUserId,
               schoolCodeInput,
-              1, // Page 1
+              1,
               newItemsPerPage
             );
           }}
@@ -769,20 +877,16 @@ export default function NotificationPage() {
     </div>
   );
 
-  // --- Crucial useEffect to update selectAll state ---
-  // This useEffect correctly determines if ALL items on the CURRENT page are selected
-  // based on the persistent selectedUserIds set.
   useEffect(() => {
     if (currentItems.length === 0) {
       setSelectAll(false);
       return;
     }
-    // Check if every item on the current page is in the selectedUserIds set
     const allItemsOnPageSelected = currentItems.every((item) =>
       selectedUserIds.has(item.id)
     );
     setSelectAll(allItemsOnPageSelected);
-  }, [currentItems, selectedUserIds]); // Dependencies are crucial
+  }, [currentItems, selectedUserIds]);
 
   if (!isClient) {
     return (
@@ -829,7 +933,6 @@ export default function NotificationPage() {
               </div>
               <div className="card-body">
                 <div className="d-flex mb-3 gap-3 flex-wrap">
-                  {/* --- Updated User Type Filter - Simple Dropdown --- */}
                   <div className="col-12 col-md-6 col-lg-3">
                     <select
                       className="form-select"
@@ -841,9 +944,6 @@ export default function NotificationPage() {
                       <option value="Teacher">Teacher</option>
                     </select>
                   </div>
-                  {/* --- End of User Type Filter Replacement --- */}
-
-                  {/* Specific User ID Filter */}
                   {/* <div className="col-12 col-md-6 col-lg-3">
                     <input
                       type="text"
@@ -853,7 +953,6 @@ export default function NotificationPage() {
                       onChange={(e) => setSpecificUserId(e.target.value)}
                     />
                   </div> */}
-                  {/* State Filter */}
                   <div className="col-12 col-md-6 col-lg-3">
                     <SearchableDropdown
                       options={states}
@@ -864,7 +963,6 @@ export default function NotificationPage() {
                       maxDisplayItems={200}
                     />
                   </div>
-                  {/* City Filter */}
                   <div className="col-12 col-md-6 col-lg-3">
                     <SearchableDropdown
                       options={cities}
@@ -875,10 +973,9 @@ export default function NotificationPage() {
                       maxDisplayItems={200}
                     />
                   </div>
-                  {/* School Filter */}
                   <div className="col-12 col-md-6 col-lg-3">
                     <SearchableDropdown
-                      options={schools} // Ensure this is an array of strings
+                      options={schools}
                       placeholder="Select School"
                       value={selectedSchool}
                       onChange={(val) => setSelectedSchool(val)}
@@ -886,7 +983,6 @@ export default function NotificationPage() {
                       maxDisplayItems={200}
                     />
                   </div>
-                  {/* School Code Filter */}
                   <div className="col-12 col-md-6 col-lg-3">
                     <input
                       type="text"
@@ -932,11 +1028,9 @@ export default function NotificationPage() {
                   </div>
                 </div>
 
-                {/* --- Updated Send Notification Button Position and Logic --- */}
                 {totalCount > 0 && (
                   <div className="d-flex justify-content-between align-items-center mb-2">
                     <div>
-                      {/* Optional: Show count of selected users */}
                       {selectedUserIds.size > 0 && (
                         <span className="text-muted small">
                           {selectedUserIds.size} user(s) selected.
@@ -946,7 +1040,6 @@ export default function NotificationPage() {
                       )}
                     </div>
                     <div>
-                      {/* Select All Matching Checkbox */}
                       <div className="form-check form-check-inline">
                         <input
                           className="form-check-input"
@@ -962,10 +1055,9 @@ export default function NotificationPage() {
                           Select All Matching ({totalCount})
                         </label>
                       </div>
-                      {/* Send Notification Button */}
                       {selectedUserIds.size > 0 && (
                         <button
-                          className="btn btn-success ms-2" // Added margin start for spacing
+                          className="btn btn-success ms-2"
                           onClick={openNotificationModal}
                         >
                           <IconSend size={18} className="me-1" /> Send
@@ -996,7 +1088,7 @@ export default function NotificationPage() {
                               className="form-check-input m-0 align-middle"
                               type="checkbox"
                               aria-label="Select all on this page"
-                              checked={selectAll} // Correctly reflects page selection state
+                              checked={selectAll}
                               onChange={handleSelectAllChange}
                             />
                           </th>
@@ -1027,7 +1119,7 @@ export default function NotificationPage() {
                                   className="form-check-input m-0 align-middle"
                                   type="checkbox"
                                   aria-label={`Select user ${user.name}`}
-                                  checked={selectedUserIds.has(user.id)} // Correctly reflects global selection state
+                                  checked={selectedUserIds.has(user.id)}
                                   onChange={() => handleCheckboxChange(user.id)}
                                 />
                               </td>
@@ -1058,9 +1150,9 @@ export default function NotificationPage() {
                       <PaginationControls
                         currentPage={currentPage}
                         totalPages={totalPages}
-                        setCurrentPage={handlePageChange} // Use the new handler
+                        setCurrentPage={handlePageChange}
                         itemsPerPage={itemsPerPage}
-                        totalItems={totalCount} // Use total count
+                        totalItems={totalCount}
                       />
                     )}
                   </div>
@@ -1070,8 +1162,7 @@ export default function NotificationPage() {
           </div>
         </div>
       </div>
-
-      {/* Notification Modal  */}
+      {/* --- Main Notification Modal --- */}
       {isModalOpen && (
         <div
           className="modal fade show"
@@ -1121,6 +1212,39 @@ export default function NotificationPage() {
                   ></textarea>
                 </div>
 
+                {/* --- Coupon Dropdown --- */}
+                <div className="mb-3">
+                  <label htmlFor="couponSelect" className="form-label">
+                    Select Coupon (Optional)
+                  </label>
+                  <select
+                    id="couponSelect"
+                    className="form-select"
+                    value={selectedCouponId || ""} // Use empty string for "None"
+                    onChange={(e) =>
+                      setSelectedCouponId(
+                        e.target.value ? Number(e.target.value) : null
+                      )
+                    }
+                    disabled={
+                      isCouponsLoading || isCheckingRedemption || isSending
+                    } // Disable during loading/checking/sending
+                  >
+                    <option value="">None</option>
+                    {isCouponsLoading ? (
+                      <option value="" disabled>
+                        Loading coupons...
+                      </option>
+                    ) : (
+                      coupons.map((coupon) => (
+                        <option key={coupon.id} value={coupon.id}>
+                          {coupon.title}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+
                 <div className="mb-3">
                   <h6>Selected Users ({selectedUserIds.size}):</h6>
                   <div className="table-responsive">
@@ -1159,7 +1283,6 @@ export default function NotificationPage() {
                     )}
                   </div>
                 </div>
-
                 {sendError && (
                   <div className="alert alert-danger" role="alert">
                     {sendError}
@@ -1171,24 +1294,24 @@ export default function NotificationPage() {
                   type="button"
                   className="btn btn-secondary"
                   onClick={closeNotificationModal}
-                  disabled={isSending}
+                  disabled={isCheckingRedemption || isSending}
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   className="btn btn-primary"
-                  onClick={handleSendNotification}
-                  disabled={isSending}
+                  onClick={checkCouponRedemption} // Use the new check function
+                  disabled={isCheckingRedemption || isSending}
                 >
-                  {isSending ? (
+                  {isCheckingRedemption || isSending ? (
                     <>
                       <span
                         className="spinner-border spinner-border-sm me-1"
                         role="status"
                         aria-hidden="true"
                       ></span>
-                      Sending...
+                      {isCheckingRedemption ? "Checking..." : "Sending..."}
                     </>
                   ) : (
                     <>
@@ -1202,6 +1325,60 @@ export default function NotificationPage() {
         </div>
       )}
       {isModalOpen && <div className="modal-backdrop fade show"></div>}
+      {/* --- Error Modal (Coupon Redemption Check Failed) --- */}
+      {isErrorModalOpen && (
+        <div
+          className="modal fade show"
+          style={{ display: "block", zIndex: 1060 }} // Ensure it's above the main modal
+          tabIndex={-1}
+          aria-labelledby="errorModalLabel"
+          aria-hidden="true"
+        >
+          <div className="modal-dialog">
+            <div className="modal-content">
+              <div className="modal-header bg-danger text-white">
+                <h5 className="modal-title" id="errorModalLabel">
+                  Redemption Check Failed
+                </h5>
+                <button
+                  type="button"
+                  className="btn-close btn-close-white"
+                  onClick={() => setIsErrorModalOpen(false)}
+                  aria-label="Close"
+                ></button>
+              </div>
+              <div className="modal-body">
+                <p>{errorModalMessage}</p>
+                {errorModalUserNames.length > 0 && (
+                  <ul>
+                    {errorModalUserNames.map((name, index) => (
+                      <li key={index}>
+                        <strong>{name}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setIsErrorModalOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {isErrorModalOpen && (
+        <div
+          className="modal-backdrop fade show"
+          style={{ zIndex: 1055 }}
+        ></div>
+      )}{" "}
+      {/* Backdrop for error modal */}
     </div>
   );
 }
