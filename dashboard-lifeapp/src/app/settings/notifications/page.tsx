@@ -1130,7 +1130,7 @@ export default function NotificationPage() {
                               <td>
                                 {user.type === 3
                                   ? "Student"
-                                  : user.type === 2
+                                  : user.type === 5
                                   ? "Teacher"
                                   : "Other"}
                               </td>
