@@ -15,7 +15,7 @@ import {
 import { ChevronDown } from "lucide-react";
 
 interface CouponRedemption {
-  "Student Name": string;
+  "Teacher Name": string;
   "School Name": string;
   "Mobile Number": string;
   state: string;
@@ -23,10 +23,9 @@ interface CouponRedemption {
   cluster: string | null;
   block: string | null;
   district: string | null;
-  grade: string | number;
+  "School Code": string;
   "Coupon Title": string;
   "Coins Redeemed": number;
-  "School Code": string;
   user_id: number;
   "Coupon Redeemed Date": string;
 }
@@ -148,6 +147,7 @@ function SearchableDropdown({
   }, [filteredOptions, displayedItems]);
 
   const hasMoreItems = filteredOptions.length > displayedItems;
+
   return (
     <div className="relative" ref={dropdownRef}>
       <div
@@ -221,7 +221,7 @@ function SearchableDropdown({
   );
 }
 
-export default function CouponsRedeemed() {
+export default function TeacherCouponsRedeemed() {
   const [isClient, setIsClient] = useState(false);
   const [coupons, setCoupons] = useState<CouponRedemption[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -245,10 +245,6 @@ export default function CouponsRedeemed() {
   const [districts, setDistricts] = useState<string[]>([]);
   const [isDistrictsLoading, setIsDistrictsLoading] = useState(false);
   const [selectedDistrict, setSelectedDistrict] = useState("");
-  const [grades] = useState<string[]>(
-    Array.from({ length: 12 }, (_, i) => (i + 1).toString())
-  );
-  const [selectedGrade, setSelectedGrade] = useState("");
   const [couponTitles, setCouponTitles] = useState<string[]>([]);
   const [isCouponTitlesLoading, setIsCouponTitlesLoading] = useState(false);
   const [selectedCouponTitle, setSelectedCouponTitle] = useState("");
@@ -271,10 +267,12 @@ export default function CouponsRedeemed() {
       setIsStatesLoading(true);
       try {
         const res = await fetch(`${api_startpoint}/api/state_list_schools`);
-        const data = await res.json();
+        const data: { state: string }[] = await res.json();
 
         if (Array.isArray(data)) {
-          const stateList = data.filter((state) => state);
+          const stateList = data
+            .map((item) => (item.state ? item.state.trim() : ""))
+            .filter((state) => state !== "");
           setStates(stateList);
           sessionStorage.setItem("stateList", JSON.stringify(stateList));
         }
@@ -291,6 +289,8 @@ export default function CouponsRedeemed() {
 
   // Fetch cities
   const fetchCities = async (state: string) => {
+    if (!state) return;
+
     setIsCitiesLoading(true);
     try {
       const res = await fetch(`${api_startpoint}/api/city_list_schools`, {
@@ -301,7 +301,23 @@ export default function CouponsRedeemed() {
 
       if (!res.ok) throw new Error(`HTTP error! Status: ${res.status}`);
       const data = await res.json();
-      setCities(data || []);
+
+      if (Array.isArray(data) && data.length > 0) {
+        const cityList: string[] = data
+          .map((city) =>
+            typeof city === "string"
+              ? city.trim()
+              : city.city
+              ? city.city.trim()
+              : ""
+          )
+          .filter((city) => city !== "");
+        setCities(cityList);
+        sessionStorage.setItem(`cityList_${state}`, JSON.stringify(cityList));
+      } else {
+        console.warn("⚠ No cities found for state:", state);
+        setCities([]);
+      }
     } catch (error) {
       console.error("❌ Error fetching city list:", error);
       setCities([]);
@@ -311,14 +327,15 @@ export default function CouponsRedeemed() {
   };
 
   useEffect(() => {
-    setSelectedCity("");
-    fetchCities(selectedState);
+    if (selectedState) {
+      setCities([]);
+      setSelectedCity("");
+      fetchCities(selectedState);
+    } else {
+      setCities([]);
+      setSelectedCity("");
+    }
   }, [selectedState]);
-
-  // Initial city load
-  useEffect(() => {
-    fetchCities("");
-  }, []);
 
   // Fetch schools
   useEffect(() => {
@@ -489,7 +506,7 @@ export default function CouponsRedeemed() {
 
   useEffect(() => {
     setIsClient(true);
-    fetchCoupons("", "", "", "", "", "", "", "", "", "", "", "", "");
+    fetchCoupons("", "", "", "", "", "", "", "", "", "", "", "");
   }, []);
 
   const fetchCoupons = async (
@@ -498,7 +515,6 @@ export default function CouponsRedeemed() {
     mobile: string,
     city: string,
     school: string,
-    grade: string,
     couponTitle: string,
     startDate: string,
     endDate: string,
@@ -510,7 +526,7 @@ export default function CouponsRedeemed() {
     setLoading(true);
     try {
       const response = await fetch(
-        `${api_startpoint}/api/coupon_redeem_search`,
+        `${api_startpoint}/api/teacher_coupon_redeem_search`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -520,7 +536,6 @@ export default function CouponsRedeemed() {
             state: state,
             city: city,
             school: school,
-            grade: grade,
             coupon_title: couponTitle,
             start_date: startDate,
             end_date: endDate,
@@ -553,7 +568,6 @@ export default function CouponsRedeemed() {
       searchMobile,
       selectedCity,
       selectedSchools,
-      selectedGrade,
       selectedCouponTitle,
       startDate,
       endDate,
@@ -576,18 +590,18 @@ export default function CouponsRedeemed() {
     setSelectedCluster("");
     setSelectedBlock("");
     setSelectedDistrict("");
-    setSelectedGrade("");
     setSelectedCouponTitle("");
     setSearchMobile("");
     setStartDate("");
     setEndDate("");
     setSchoolCodeInput("");
-    fetchCoupons("", "", "", "", "", "", "", "", "", "", "", "", "");
+    fetchCoupons("", "", "", "", "", "", "", "", "", "", "", "");
   };
 
   const exportToCSV = () => {
     const headers = [
-      "Student Name",
+      "S.No.", // Added serial number header
+      "Teacher Name",
       "School Name",
       "Mobile Number",
       "State",
@@ -595,18 +609,18 @@ export default function CouponsRedeemed() {
       "Cluster",
       "Block",
       "District",
-      "Grade",
-      "Coupon Title",
-      "Coins Redeemed",
       "Status",
       "School Code",
+      "Coupon Title",
+      "Coins Redeemed",
       "User ID",
       "Coupon Redeemed Date",
     ];
     const csvRows = [headers.join(",")];
-    coupons.forEach((coupon) => {
+    coupons.forEach((coupon, index) => {
       const row = [
-        coupon["Student Name"] || "",
+        index + 1, // Serial number
+        coupon["Teacher Name"] || "",
         coupon["School Name"] || "",
         coupon["Mobile Number"] || "",
         coupon.state || "",
@@ -614,11 +628,10 @@ export default function CouponsRedeemed() {
         coupon.cluster || "",
         coupon.block || "",
         coupon.district || "",
-        coupon.grade || "",
-        coupon["Coupon Title"] || "",
-        coupon["Coins Redeemed"] || "",
         (coupon as any).status || "",
         coupon["School Code"] || "",
+        coupon["Coupon Title"] || "",
+        coupon["Coins Redeemed"] || "",
         coupon.user_id,
         coupon["Coupon Redeemed Date"] || "",
       ];
@@ -629,7 +642,7 @@ export default function CouponsRedeemed() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "student_coupon_redemptions.csv";
+    link.download = "teacher_coupon_redemptions.csv";
     link.click();
   };
 
@@ -663,7 +676,7 @@ export default function CouponsRedeemed() {
           <div className="container-xl pt-0 pb-4">
             <div className="card">
               <div className="card-header">
-                <h3 className="card-title">Coupon Redemptions</h3>
+                <h3 className="card-title">Teacher Coupon Redemptions</h3>
               </div>
               <div className="card-body">
                 <div className="text-center py-4">
@@ -742,7 +755,7 @@ export default function CouponsRedeemed() {
           <div className="container-xl pt-0 pb-4">
             <div className="card">
               <div className="card-header">
-                <h3 className="card-title">Student Coupon Redemptions</h3>
+                <h3 className="card-title">Teacher Coupon Redemptions</h3>
               </div>
               <div className="card-body">
                 <div className="d-flex mb-3 gap-3 flex-wrap">
@@ -834,21 +847,11 @@ export default function CouponsRedeemed() {
                       <input
                         type="text"
                         className="form-control"
-                        placeholder="Search Student Name"
+                        placeholder="Search Teacher Name"
                         value={searchTerm}
                         onChange={handleSearchChange}
                       />
                     </div>
-                  </div>
-
-                  <div className="col-12 col-md-6 col-lg-3">
-                    <SearchableDropdown
-                      options={grades}
-                      placeholder="Select Grade"
-                      value={selectedGrade}
-                      onChange={(val) => setSelectedGrade(val)}
-                      maxDisplayItems={12}
-                    />
                   </div>
 
                   <div className="col-12 col-md-6 col-lg-3">
@@ -936,7 +939,9 @@ export default function CouponsRedeemed() {
                     <table className="table table-vcenter table-hover">
                       <thead>
                         <tr>
-                          <th>Student Name</th>
+                          {/* Added serial number column */}
+                          <th className="text-center">S.No.</th>
+                          <th>Teacher Name</th>
                           <th>School Name</th>
                           <th>Mobile Number</th>
                           <th>State</th>
@@ -944,11 +949,10 @@ export default function CouponsRedeemed() {
                           <th>Cluster</th>
                           <th>Block</th>
                           <th>District</th>
-                          <th>Grade</th>
-                          <th>Coupon Title</th>
-                          <th>Coins Redeemed</th>
                           <th>Status</th>
                           <th>School Code</th>
+                          <th>Coupon Title</th>
+                          <th>Coins Redeemed</th>
                           <th>User ID</th>
                           <th>Redeemed Date</th>
                         </tr>
@@ -956,14 +960,19 @@ export default function CouponsRedeemed() {
                       <tbody>
                         {currentItems.length === 0 ? (
                           <tr>
-                            <td colSpan={14} className="text-center">
+                            {/* Updated colspan to 15 for new column */}
+                            <td colSpan={15} className="text-center">
                               No redemptions found
                             </td>
                           </tr>
                         ) : (
                           currentItems.map((coupon, index) => (
                             <tr key={index}>
-                              <td>{coupon["Student Name"]}</td>
+                              {/* Added serial number cell */}
+                              <td className="text-center">
+                                {indexOfFirstItem + index + 1}
+                              </td>
+                              <td>{coupon["Teacher Name"]}</td>
                               <td>{coupon["School Name"]}</td>
                               <td>{coupon["Mobile Number"]}</td>
                               <td>{coupon.state}</td>
@@ -971,11 +980,10 @@ export default function CouponsRedeemed() {
                               <td>{coupon.cluster || "-"}</td>
                               <td>{coupon.block || "-"}</td>
                               <td>{coupon.district || "-"}</td>
-                              <td>{coupon.grade}</td>
-                              <td>{coupon["Coupon Title"]}</td>
-                              <td>{coupon["Coins Redeemed"]}</td>
                               <td>{(coupon as any).status || "-"}</td>
                               <td>{coupon["School Code"]}</td>
+                              <td>{coupon["Coupon Title"]}</td>
+                              <td>{coupon["Coins Redeemed"]}</td>
                               <td>{coupon.user_id}</td>
                               <td>
                                 {formatDate(coupon["Coupon Redeemed Date"])}
