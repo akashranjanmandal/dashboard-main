@@ -587,6 +587,7 @@ export default function CouponsRedeemed() {
 
   const exportToCSV = () => {
     const headers = [
+      "S.No.", // Added serial number header
       "Student Name",
       "School Name",
       "Mobile Number",
@@ -604,8 +605,9 @@ export default function CouponsRedeemed() {
       "Coupon Redeemed Date",
     ];
     const csvRows = [headers.join(",")];
-    coupons.forEach((coupon) => {
+    coupons.forEach((coupon, index) => {
       const row = [
+        index + 1, // Serial number
         coupon["Student Name"] || "",
         coupon["School Name"] || "",
         coupon["Mobile Number"] || "",
@@ -936,6 +938,8 @@ export default function CouponsRedeemed() {
                     <table className="table table-vcenter table-hover">
                       <thead>
                         <tr>
+                          {/* Added serial number column header */}
+                          <th className="text-center">S.No.</th>
                           <th>Student Name</th>
                           <th>School Name</th>
                           <th>Mobile Number</th>
@@ -956,13 +960,18 @@ export default function CouponsRedeemed() {
                       <tbody>
                         {currentItems.length === 0 ? (
                           <tr>
-                            <td colSpan={14} className="text-center">
+                            {/* Updated colspan to 15 for new column */}
+                            <td colSpan={15} className="text-center">
                               No redemptions found
                             </td>
                           </tr>
                         ) : (
                           currentItems.map((coupon, index) => (
                             <tr key={index}>
+                              {/* Added serial number cell */}
+                              <td className="text-center">
+                                {indexOfFirstItem + index + 1}
+                              </td>
                               <td>{coupon["Student Name"]}</td>
                               <td>{coupon["School Name"]}</td>
                               <td>{coupon["Mobile Number"]}</td>
