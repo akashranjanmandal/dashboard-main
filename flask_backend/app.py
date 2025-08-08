@@ -2899,12 +2899,13 @@ def fetch_coupon_redeem_list():
             u.school_code AS 'School Code',
             cr.user_id, 
             cr.created_at AS 'Coupon Redeemed Date',
-            cr.status AS 'status' -- Added status column
+            cr.status AS 'status' 
         FROM lifeapp.coupon_redeems cr 
         INNER JOIN lifeapp.users u ON u.id = cr.user_id 
         INNER JOIN lifeapp.schools ls ON ls.id = u.school_id
         INNER JOIN lifeapp.coupons lc ON lc.id = cr.coupon_id
         WHERE u.type = 3
+        ORDER BY cr.created_at DESC;
     """
     filters = []
     params = []
@@ -4774,6 +4775,7 @@ def fetch_teacher_coupon_redeem_list():
         INNER JOIN lifeapp.schools ls ON ls.id = u.school_id
         INNER JOIN lifeapp.coupons lc ON lc.id = cr.coupon_id
         WHERE u.type = 5  # Filter for teachers
+        ORDER BY cr.created_at DESC;
     """
     filters = []
     params = []
@@ -9766,7 +9768,163 @@ def notification_check_coupon_redemption():
     finally:
         if connection and connection.open:
             connection.close()
+# --- New Endpoint: Check Coupon Status for Selected Users ---
+@app.route('/api/notification_check_coupon_status', methods=['POST'])
+def notification_check_coupon_status():
+    """
+    Checks if the selected users have the correct status ('Processing') for the specified coupon.
+    This check is primarily used when the admin uses the 'See full coupons list' feature.
+    Expects JSON: {
+        "user_ids": [1, 2, 3],
+        "coupon_id": 5
+    }
+    Returns:
+        - Success (200): { "success": true, "message": "..." } if all relevant records are 'Processing'.
+        - Failure (200): { "success": false, "coupon_title": "...", "wrong_status_users": ["User Name - Current Status", ...] }
+        - Error (4xx/5xx): { "error": "..." } if input is invalid or an error occurs.
+    """
+    data = request.get_json() or {}
+    user_ids = data.get('user_ids', [])
+    coupon_id = data.get('coupon_id')
 
+    # --- Validate Input ---
+    if not isinstance(user_ids, list) or not all(isinstance(uid, int) for uid in user_ids):
+        return jsonify({'error': 'Invalid user_ids format. Must be a list of integers.'}), 400
+    if not user_ids:
+        return jsonify({'error': 'No user IDs provided.'}), 400
+    if not isinstance(coupon_id, int):
+        return jsonify({'error': 'Invalid or missing coupon_id. Must be an integer.'}), 400
+
+    connection = None
+    try:
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            # 1. Check if the coupon exists and is active
+            cursor.execute("SELECT id, title FROM lifeapp.coupons WHERE id = %s AND status = 1", (coupon_id,))
+            coupon_result = cursor.fetchone()
+            if not coupon_result:
+                 return jsonify({'error': f'Coupon with ID {coupon_id} not found or not active.'}), 404
+            coupon_title = coupon_result['title']
+
+            # 2. Get the coupon_redeems records for the given users and coupon
+            placeholders = ','.join(['%s'] * len(user_ids))
+            sql_check_status = f"""
+                SELECT cr.user_id, cr.status, u.name
+                FROM lifeapp.coupon_redeems cr
+                JOIN lifeapp.users u ON cr.user_id = u.id
+                WHERE cr.coupon_id = %s AND cr.user_id IN ({placeholders})
+            """
+            cursor.execute(sql_check_status, [coupon_id] + user_ids)
+            redeem_records = cursor.fetchall()
+
+            # 3. Check if any selected users *do not* have a record for this coupon
+            # (This might be redundant if the frontend ensures the coupon exists for the user,
+            # but it's safer to check).
+            # Get the set of user_ids that actually have a redeem record
+            redeem_user_ids = {record['user_id'] for record in redeem_records}
+            # Find user_ids that were selected but have no redeem record
+            missing_redeem_user_ids = set(user_ids) - redeem_user_ids
+
+            # 4. Find users with a status that is NOT 'Processing'
+            wrong_status_records = [
+                record for record in redeem_records
+                if record['status'] != 'Processing'
+            ]
+
+            # 5. Prepare lists for the response
+            # Users with missing redeem records (should ideally be none if frontend is correct)
+            # We can choose to report these or ignore them based on requirements.
+            # For now, let's focus on wrong status. If a user has no record, the redemption check
+            # should have caught it. We'll focus on users who have records with wrong status.
+
+            # Users with wrong status
+            wrong_status_info = [
+                f"{record['name']} - {record['status']}"
+                for record in wrong_status_records
+            ]
+
+            # 6. If any users have the wrong status, return failure
+            if wrong_status_info:
+                return jsonify({
+                    "success": False,
+                    "coupon_title": coupon_title,
+                    "wrong_status_users": wrong_status_info
+                })
+
+            # 7. If we get here, all relevant records (for users who have them) are 'Processing'
+            # We can optionally also check if all selected users have a record, but that's the
+            # redemption check's job. This check is specifically for status.
+            return jsonify({
+                "success": True,
+                "message": f"All relevant users have 'Processing' status for coupon '{coupon_title}'."
+            })
+
+    except Exception as e:
+        logging.error(f"Error in /api/notification_check_coupon_status: {e}")
+        return jsonify({'error': f'An error occurred during the status check: {str(e)}'}), 500
+    finally:
+        if connection and connection.open:
+            connection.close()
+
+# --- Also add/modify the existing /api/notification_get_filtered_coupons endpoint ---
+# You need to implement this endpoint as discussed previously if you haven't already.
+# Here is the implementation based on the previous discussion:
+
+@app.route('/api/notification_get_filtered_coupons', methods=['POST'])
+def notification_get_filtered_coupons():
+    """
+    Fetches active coupons (status=1) that have at least one 'Processing'
+    entry in coupon_redeems for the provided list of user_ids.
+    Expects JSON: { "user_ids": [1, 2, 3] }
+    Returns JSON array of coupon objects [{id, title, status}, ...].
+    """
+    data = request.get_json() or {}
+    user_ids = data.get('user_ids', [])
+
+    # Validate input
+    if not isinstance(user_ids, list) or not all(isinstance(uid, int) for uid in user_ids):
+        return jsonify({'error': 'Invalid user_ids format. Must be a list of integers.'}), 400
+    if not user_ids:
+        # If no users selected, return empty list
+        return jsonify([])
+
+    connection = None
+    try:
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            # Use placeholders for user_ids to prevent SQL injection
+            user_placeholders = ','.join(['%s'] * len(user_ids))
+
+            # Query to find distinct coupon IDs that are active and have
+            # 'Processing' redeems for the given user IDs
+            # Then join back to coupons table to get full details
+            sql = f"""
+                SELECT DISTINCT c.id, c.title, c.status
+                FROM lifeapp.coupons c
+                INNER JOIN lifeapp.coupon_redeems cr ON c.id = cr.coupon_id
+                WHERE c.status = 1
+                AND cr.status = 'Processing'
+                AND cr.user_id IN ({user_placeholders})
+                ORDER BY c.title ASC
+            """
+
+            cursor.execute(sql, user_ids)
+            coupons = cursor.fetchall() or []
+
+        return jsonify(coupons)
+
+    except Exception as e:
+        logging.error(f"Error in /api/notification_get_filtered_coupons: {e}")
+        return jsonify({'error': f'An error occurred while fetching coupons: {str(e)}'}), 500
+    finally:
+        if connection and connection.open:
+            connection.close()
 
 
 
@@ -10874,6 +11032,96 @@ def delete_coupon(id):
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+
+# GET all app settings
+@app.route('/api/app-settings', methods=['GET'])
+def get_app_settings():
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT `key`, `value`, created_at, updated_at 
+                FROM lifeapp.app_settings
+            """)
+            settings = cursor.fetchall()
+            return jsonify(settings)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+# POST create a new app setting
+@app.route('/api/app-settings', methods=['POST'])
+def add_app_setting():
+    data = request.get_json()
+    key = data.get('key')
+    value = data.get('value')
+
+    if not key or not value:
+        return jsonify({'error': 'Key and value are required'}), 400
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM app_settings WHERE `key` = %s", (key,))
+            if cur.fetchone():
+                return jsonify({'error': 'Setting with this key already exists'}), 400
+
+            cur.execute("""
+                INSERT INTO app_settings (`key`, `value`, created_at, updated_at)
+                VALUES (%s, %s, NOW(), NOW())
+            """, (key, value))
+            conn.commit()
+            return jsonify({'success': True}), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+# PUT update app setting
+@app.route('/api/app-settings/<key>', methods=['PUT'])
+def update_app_setting(key):
+    data = request.get_json()
+    value = data.get('value')
+    if not value:
+        return jsonify({'error': 'Value is required'}), 400
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE app_settings
+                SET value = %s, updated_at = NOW()
+                WHERE `key` = %s
+            """, (value, key))
+            conn.commit()
+            if cur.rowcount == 0:
+                return jsonify({'error': 'Setting not found'}), 404
+            return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+# DELETE app setting
+@app.route('/api/app-settings/<key>', methods=['DELETE'])
+def delete_app_setting(key):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM app_settings WHERE `key` = %s", (key,))
+            conn.commit()
+            if cur.rowcount == 0:
+                return jsonify({'error': 'Setting not found'}), 404
+            return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
 
 ###################################################################################
 ###################################################################################
