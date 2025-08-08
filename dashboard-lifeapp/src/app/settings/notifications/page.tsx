@@ -54,7 +54,6 @@ interface User {
   board_name: string | null;
   school_name?: string;
 }
-
 interface PaginatedUsersResponse {
   users: User[];
   total_count: number;
@@ -62,7 +61,6 @@ interface PaginatedUsersResponse {
   total_pages: number;
   items_per_page: number;
 }
-
 interface Coupon {
   id: number;
   title: string;
@@ -302,6 +300,9 @@ export default function NotificationPage() {
   const [errorModalMessage, setErrorModalMessage] = useState(""); // Message for error modal
   const [errorModalUserNames, setErrorModalUserNames] = useState<string[]>([]); // User names for error modal
 
+  // --- NEW STATE: Control Coupon Filtering ---
+  const [showAllCoupons, setShowAllCoupons] = useState(false); // State to toggle full coupon list
+
   // --- Modal Pagination (for selected users list) ---
   const [modalSelectedUsers, setModalSelectedUsers] = useState<User[]>([]); // State for users fetched for modal
   const modalTotalPages = Math.ceil(
@@ -427,26 +428,49 @@ export default function NotificationPage() {
     }
   }, [selectedState, selectedCity]);
 
-  // --- Fetch Active Coupons ---
-  useEffect(() => {
-    async function fetchCoupons() {
-      setIsCouponsLoading(true);
-      try {
-        const res = await fetch(
-          `${api_startpoint}/api/notification_get_active_coupons`
-        );
-        if (!res.ok) throw new Error(`HTTP error! Status: ${res.status}`);
-        const data: Coupon[] = await res.json();
-        setCoupons(data);
-      } catch (error) {
-        console.error("Error fetching coupons:", error);
-        setCoupons([]);
-      } finally {
-        setIsCouponsLoading(false);
+  // --- Fetch Coupons (Modified to support filtering) ---
+  // This function now fetches either filtered or all active coupons based on state
+  const fetchCoupons = useCallback(async () => {
+    setIsCouponsLoading(true);
+    try {
+      let url;
+      let body = null;
+      let method = 'GET'; // Default method
+
+      if (showAllCoupons) {
+        // Fetch all active coupons
+        url = `${api_startpoint}/api/notification_get_active_coupons`;
+      } else {
+        // Fetch filtered coupons (active, with 'Processing' redeems for selected users)
+        // Pass selected user IDs to the backend
+        url = `${api_startpoint}/api/notification_get_filtered_coupons`;
+        method = 'POST';
+        body = JSON.stringify({ user_ids: Array.from(selectedUserIds) });
       }
+
+      const res = await fetch(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        ...(body && { body }) // Include body only for POST request
+      });
+
+      if (!res.ok) throw new Error(`HTTP error! Status: ${res.status}`);
+      const data: Coupon[] = await res.json();
+      setCoupons(data);
+    } catch (error) {
+      console.error("Error fetching coupons:", error);
+      setCoupons([]);
+    } finally {
+      setIsCouponsLoading(false);
     }
-    fetchCoupons();
-  }, []);
+  }, [showAllCoupons, selectedUserIds]); // Re-run if filter state or selected users change
+
+  // Fetch coupons when the modal opens or when filter state/user selection changes
+  useEffect(() => {
+    if (isModalOpen) { // Only fetch when modal is open
+        fetchCoupons();
+    }
+  }, [isModalOpen, fetchCoupons]); // Depend on isModalOpen and the memoized fetchCoupons
 
   useEffect(() => {
     setIsClient(true);
@@ -672,8 +696,13 @@ export default function NotificationPage() {
     }
     setIsModalOpen(true);
     setSendError(null);
+    
+    // --- Reset coupon filter state when modal opens ---
+    setShowAllCoupons(false); // Reset to filtered view on opening
+    
     // --- Fetch full user details for the modal ---
     await fetchUsersForModal(Array.from(selectedUserIds));
+    // Note: fetchCoupons is now triggered by the useEffect that watches isModalOpen and fetchCoupons
   };
 
   const closeNotificationModal = () => {
@@ -682,24 +711,29 @@ export default function NotificationPage() {
     setNotificationMessage("");
     setSendError(null);
     setSelectedCouponId(null); // Reset coupon selection
+    
+    // --- Reset coupon filter state when modal closes ---
+    setShowAllCoupons(false); // Reset to filtered view on closing
+    
     // Clear modal user data
     setModalSelectedUsers([]);
     setModalCurrentPage(1);
   };
 
-  // --- New Function: Check Coupon Redemption ---
-  const checkCouponRedemption = async () => {
+  // --- Modified: Check Coupon Redemption and Status ---
+  const checkCouponRedemptionAndStatus = async () => {
     if (!selectedCouponId || selectedCouponId <= 0) {
       // If "None" is selected, proceed directly to sending
       handleSendNotification();
       return;
     }
-
     setIsCheckingRedemption(true);
     setSendError(null);
     try {
       const userIdsArray = Array.from(selectedUserIds);
-      const response = await fetch(
+      
+      // --- Step 1: Check if coupon exists for users (Redemption Check) ---
+      const redemptionResponse = await fetch(
         `${api_startpoint}/api/notification_check_coupon_redemption`,
         {
           method: "POST",
@@ -710,41 +744,71 @@ export default function NotificationPage() {
           }),
         }
       );
-
-      const result = await response.json();
-
-      if (!response.ok) {
+      const redemptionResult = await redemptionResponse.json();
+      if (!redemptionResponse.ok) {
         // Handle error from backend (e.g., coupon not found)
         throw new Error(
-          result.error || `Redemption check failed: ${response.status}`
+          redemptionResult.error || `Redemption check failed: ${redemptionResponse.status}`
         );
       }
-
-      if (result.success === false) {
+      if (redemptionResult.success === false) {
         // Redemption check failed - show error modal
         setErrorModalMessage(
-          `"${result.coupon_title}" hasn't been redeemed by:`
+          `"${redemptionResult.coupon_title}" hasn't been redeemed by:`
         );
-        setErrorModalUserNames(result.non_redeeming_users || []); // Expecting names from backend
+        setErrorModalUserNames(redemptionResult.non_redeeming_users || []); // Expecting names from backend
         setIsErrorModalOpen(true);
         return; // Stop the process
       }
 
-      // If check passes, proceed to send notification
+      // --- Step 2: If Redemption Check passes, check status (only if showAllCoupons is true) ---
+      if (showAllCoupons) {
+        const statusResponse = await fetch(
+          `${api_startpoint}/api/notification_check_coupon_status`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user_ids: userIdsArray,
+              coupon_id: selectedCouponId,
+            }),
+          }
+        );
+        const statusResult = await statusResponse.json();
+        
+        if (!statusResponse.ok) {
+            // Handle unexpected error from backend
+            throw new Error(statusResult.error || `Status check failed: ${statusResponse.status}`);
+        }
+
+        if (statusResult.success === false) {
+            // Status check failed - show error modal for wrong status
+            setErrorModalMessage(
+              `"${statusResult.coupon_title}" has already been processed for:`
+            );
+            // Assuming backend returns an array of strings like "UserName - Status"
+            setErrorModalUserNames(statusResult.wrong_status_users || []);
+            setIsErrorModalOpen(true);
+            return; // Stop the process
+        }
+        // If status check passes, proceed to send notification
+      }
+
+      // If all checks pass (or if showAllCoupons is false and redemption check passes), proceed to send
       handleSendNotification();
     } catch (error) {
       const errorMessage =
         error instanceof Error
           ? error.message
-          : "An unknown error occurred during the check.";
-      console.error("Coupon Redemption Check Error:", error);
-      setSendError(`Redemption Check Error: ${errorMessage}`);
+          : "An unknown error occurred during the checks.";
+      console.error("Coupon Checks Error:", error);
+      setSendError(`Checks Error: ${errorMessage}`);
     } finally {
       setIsCheckingRedemption(false);
     }
   };
 
-  // --- Modified: Handle Send Notification (now called by checkCouponRedemption) ---
+  // --- Modified: Handle Send Notification (now called by checkCouponRedemptionAndStatus) ---
   const handleSendNotification = async () => {
     if (!notificationTitle.trim() || !notificationMessage.trim()) {
       setSendError("Please enter both title and message.");
@@ -768,13 +832,11 @@ export default function NotificationPage() {
       if (selectedCouponId && selectedCouponId > 0) {
         payload.coupon_id = selectedCouponId;
       }
-
       const response = await fetch(`${api_startpoint}/api/notification_send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(
@@ -782,7 +844,6 @@ export default function NotificationPage() {
             `Failed to send notification: ${response.status} ${response.statusText}`
         );
       }
-
       const result = await response.json();
       console.log("Notification sent successfully:", result);
       alert("Notification sent successfully!");
@@ -1027,7 +1088,6 @@ export default function NotificationPage() {
                     </button>
                   </div>
                 </div>
-
                 {totalCount > 0 && (
                   <div className="d-flex justify-content-between align-items-center mb-2">
                     <div>
@@ -1067,7 +1127,6 @@ export default function NotificationPage() {
                     </div>
                   </div>
                 )}
-
                 {loading ? (
                   <div className="text-center py-4">
                     <div className="spinner-border text-primary" role="status">
@@ -1162,6 +1221,7 @@ export default function NotificationPage() {
           </div>
         </div>
       </div>
+
       {/* --- Main Notification Modal --- */}
       {isModalOpen && (
         <div
@@ -1211,8 +1271,8 @@ export default function NotificationPage() {
                     placeholder="Enter notification message"
                   ></textarea>
                 </div>
-
-                {/* --- Coupon Dropdown --- */}
+                
+                {/* --- Modified Coupon Dropdown --- */}
                 <div className="mb-3">
                   <label htmlFor="couponSelect" className="form-label">
                     Select Coupon (Optional)
@@ -1221,11 +1281,19 @@ export default function NotificationPage() {
                     id="couponSelect"
                     className="form-select"
                     value={selectedCouponId || ""} // Use empty string for "None"
-                    onChange={(e) =>
-                      setSelectedCouponId(
-                        e.target.value ? Number(e.target.value) : null
-                      )
-                    }
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "SHOW_ALL") {
+                        // Handle the "See Full List" option
+                        setShowAllCoupons(true);
+                        // fetchCoupons will be triggered by the useEffect
+                      } else {
+                        // Handle normal coupon selection
+                        setSelectedCouponId(
+                          value ? Number(value) : null
+                        );
+                      }
+                    }}
                     disabled={
                       isCouponsLoading || isCheckingRedemption || isSending
                     } // Disable during loading/checking/sending
@@ -1236,15 +1304,23 @@ export default function NotificationPage() {
                         Loading coupons...
                       </option>
                     ) : (
-                      coupons.map((coupon) => (
-                        <option key={coupon.id} value={coupon.id}>
-                          {coupon.title}
-                        </option>
-                      ))
+                      <>
+                        {/* Map over the fetched coupons */}
+                        {coupons.map((coupon) => (
+                          <option key={coupon.id} value={coupon.id}>
+                            {coupon.title}
+                          </option>
+                        ))}
+                        {/* Conditionally render the "See Full List" option */}
+                        {/* Only show it if we are currently showing the filtered list */}
+                        {!showAllCoupons && (
+                          <option value="SHOW_ALL">[ See the full coupons list ]</option>
+                        )}
+                      </>
                     )}
                   </select>
                 </div>
-
+                
                 <div className="mb-3">
                   <h6>Selected Users ({selectedUserIds.size}):</h6>
                   <div className="table-responsive">
@@ -1301,7 +1377,7 @@ export default function NotificationPage() {
                 <button
                   type="button"
                   className="btn btn-primary"
-                  onClick={checkCouponRedemption} // Use the new check function
+                  onClick={checkCouponRedemptionAndStatus} // Use the new combined check function
                   disabled={isCheckingRedemption || isSending}
                 >
                   {isCheckingRedemption || isSending ? (
@@ -1325,7 +1401,8 @@ export default function NotificationPage() {
         </div>
       )}
       {isModalOpen && <div className="modal-backdrop fade show"></div>}
-      {/* --- Error Modal (Coupon Redemption Check Failed) --- */}
+
+      {/* --- Error Modal (Coupon Check Failed - Redemption or Status) --- */}
       {isErrorModalOpen && (
         <div
           className="modal fade show"
@@ -1338,7 +1415,7 @@ export default function NotificationPage() {
             <div className="modal-content">
               <div className="modal-header bg-danger text-white">
                 <h5 className="modal-title" id="errorModalLabel">
-                  Redemption Check Failed
+                  Check Failed
                 </h5>
                 <button
                   type="button"
