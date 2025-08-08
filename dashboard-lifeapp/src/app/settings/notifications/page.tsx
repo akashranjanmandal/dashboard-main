@@ -15,7 +15,6 @@ import {
   IconUser,
 } from "@tabler/icons-react";
 import { ChevronDown } from "lucide-react";
-
 // --- Interfaces ---
 interface User {
   id: number;
@@ -66,11 +65,9 @@ interface Coupon {
   title: string;
   status: number;
 }
-
 // --- Constants ---
 // const api_startpoint = "http://localhost:5000";
 const api_startpoint = "http://152.42.239.141:5000";
-
 // --- SearchableDropdown Component ---
 function SearchableDropdown({
   options,
@@ -94,7 +91,6 @@ function SearchableDropdown({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
@@ -109,7 +105,6 @@ function SearchableDropdown({
       }
     };
   }, [searchTerm, maxDisplayItems]);
-
   const filteredOptions = useMemo(() => {
     if (!debouncedSearchTerm.trim()) {
       return options;
@@ -120,7 +115,6 @@ function SearchableDropdown({
         typeof option === "string" && option.toLowerCase().includes(searchLower)
     );
   }, [options, debouncedSearchTerm]);
-
   const handleScroll = useCallback(() => {
     if (!scrollContainerRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } =
@@ -135,7 +129,6 @@ function SearchableDropdown({
       );
     }
   }, [displayedItems, filteredOptions.length, maxDisplayItems]);
-
   useEffect(() => {
     const scrollContainer = scrollContainerRef.current;
     if (scrollContainer) {
@@ -147,7 +140,6 @@ function SearchableDropdown({
       }
     };
   }, [handleScroll]);
-
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (
@@ -164,7 +156,6 @@ function SearchableDropdown({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [isOpen]);
-
   const handleSelect = (option: string) => {
     onChange(option);
     setIsOpen(false);
@@ -172,13 +163,10 @@ function SearchableDropdown({
     setDebouncedSearchTerm("");
     setDisplayedItems(maxDisplayItems);
   };
-
   const visibleOptions = useMemo(() => {
     return filteredOptions.slice(0, displayedItems);
   }, [filteredOptions, displayedItems]);
-
   const hasMoreItems = filteredOptions.length > displayedItems;
-
   return (
     <div className="relative" ref={dropdownRef}>
       <div
@@ -248,7 +236,6 @@ function SearchableDropdown({
     </div>
   );
 }
-
 // --- Main Component ---
 export default function NotificationPage() {
   const [isClient, setIsClient] = useState(false);
@@ -281,7 +268,8 @@ export default function NotificationPage() {
   const [selectAll, setSelectAll] = useState(false);
   const [selectAllMatching, setSelectAllMatching] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
-
+  // --- New State for Uncheck All Button ---
+  const [showUncheckAll, setShowUncheckAll] = useState(false);
   // --- Modal States ---
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [notificationTitle, setNotificationTitle] = useState("");
@@ -290,7 +278,6 @@ export default function NotificationPage() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [modalCurrentPage, setModalCurrentPage] = useState(1);
   const modalItemsPerPage = 5;
-
   // --- New States for Coupon Feature ---
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [isCouponsLoading, setIsCouponsLoading] = useState(false);
@@ -299,10 +286,8 @@ export default function NotificationPage() {
   const [isErrorModalOpen, setIsErrorModalOpen] = useState(false); // State for error modal
   const [errorModalMessage, setErrorModalMessage] = useState(""); // Message for error modal
   const [errorModalUserNames, setErrorModalUserNames] = useState<string[]>([]); // User names for error modal
-
   // --- NEW STATE: Control Coupon Filtering ---
   const [showAllCoupons, setShowAllCoupons] = useState(false); // State to toggle full coupon list
-
   // --- Modal Pagination (for selected users list) ---
   const [modalSelectedUsers, setModalSelectedUsers] = useState<User[]>([]); // State for users fetched for modal
   const modalTotalPages = Math.ceil(
@@ -314,7 +299,6 @@ export default function NotificationPage() {
     modalIndexOfFirstItem,
     modalIndexOfLastItem
   );
-
   // --- Fetch States ---
   useEffect(() => {
     async function fetchStates() {
@@ -353,7 +337,6 @@ export default function NotificationPage() {
     }
     fetchStates();
   }, []);
-
   // --- Fetch Cities ---
   const fetchCities = async (state: string) => {
     setIsCitiesLoading(true);
@@ -377,7 +360,6 @@ export default function NotificationPage() {
       setIsCitiesLoading(false);
     }
   };
-
   useEffect(() => {
     setSelectedCity("");
     setSelectedSchool("");
@@ -388,7 +370,6 @@ export default function NotificationPage() {
       fetchCities("");
     }
   }, [selectedState]);
-
   // --- Fetch Schools ---
   const fetchSchools = async (state: string, city: string) => {
     setIsSchoolsLoading(true);
@@ -418,7 +399,6 @@ export default function NotificationPage() {
       setIsSchoolsLoading(false);
     }
   };
-
   useEffect(() => {
     setSelectedSchool("");
     if (selectedState || selectedCity) {
@@ -427,7 +407,6 @@ export default function NotificationPage() {
       setSchools([]);
     }
   }, [selectedState, selectedCity]);
-
   // --- Fetch Coupons (Modified to support filtering) ---
   // This function now fetches either filtered or all active coupons based on state
   const fetchCoupons = useCallback(async () => {
@@ -436,7 +415,6 @@ export default function NotificationPage() {
       let url;
       let body = null;
       let method = 'GET'; // Default method
-
       if (showAllCoupons) {
         // Fetch all active coupons
         url = `${api_startpoint}/api/notification_get_active_coupons`;
@@ -447,13 +425,11 @@ export default function NotificationPage() {
         method = 'POST';
         body = JSON.stringify({ user_ids: Array.from(selectedUserIds) });
       }
-
       const res = await fetch(url, {
         method: method,
         headers: { 'Content-Type': 'application/json' },
         ...(body && { body }) // Include body only for POST request
       });
-
       if (!res.ok) throw new Error(`HTTP error! Status: ${res.status}`);
       const data: Coupon[] = await res.json();
       setCoupons(data);
@@ -464,19 +440,16 @@ export default function NotificationPage() {
       setIsCouponsLoading(false);
     }
   }, [showAllCoupons, selectedUserIds]); // Re-run if filter state or selected users change
-
   // Fetch coupons when the modal opens or when filter state/user selection changes
   useEffect(() => {
     if (isModalOpen) { // Only fetch when modal is open
         fetchCoupons();
     }
   }, [isModalOpen, fetchCoupons]); // Depend on isModalOpen and the memoized fetchCoupons
-
   useEffect(() => {
     setIsClient(true);
     fetchUsers("", "", "", "", "", "All Users", "", "", 1, itemsPerPage);
   }, []);
-
   // --- Fetch Paginated Users ---
   const fetchUsers = async (
     query: string,
@@ -530,12 +503,12 @@ export default function NotificationPage() {
       setLoading(false);
     }
   };
-
   const handleSearch = () => {
     setCurrentPage(1);
-    setSelectedUserIds(new Set());
-    setSelectAll(false);
-    setSelectAllMatching(false);
+    // --- CHANGED: Do NOT clear selectedUserIds, selectAll, selectAllMatching on search ---
+    // setSelectedUserIds(new Set());
+    // setSelectAll(false);
+    // setSelectAllMatching(false);
     fetchUsers(
       searchTerm,
       selectedState,
@@ -549,11 +522,9 @@ export default function NotificationPage() {
       itemsPerPage
     );
   };
-
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(e.target.value);
   };
-
   const handleClearFilters = () => {
     setSearchTerm("");
     setSelectedState("");
@@ -564,12 +535,12 @@ export default function NotificationPage() {
     setSpecificUserId("");
     setSchoolCodeInput("");
     setCurrentPage(1);
-    setSelectedUserIds(new Set());
-    setSelectAll(false);
-    setSelectAllMatching(false);
+    // --- CHANGED: Do NOT clear selectedUserIds, selectAll, selectAllMatching on clear filters ---
+    // setSelectedUserIds(new Set());
+    // setSelectAll(false);
+    // setSelectAllMatching(false);
     fetchUsers("", "", "", "", "", "All Users", "", "", 1, itemsPerPage);
   };
-
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
     fetchUsers(
@@ -585,7 +556,6 @@ export default function NotificationPage() {
       itemsPerPage
     );
   };
-
   const handleCheckboxChange = (userId: number) => {
     setSelectedUserIds((prev) => {
       const newSet = new Set(prev);
@@ -605,7 +575,6 @@ export default function NotificationPage() {
       return newSet;
     });
   };
-
   const handleSelectAllChange = () => {
     if (selectAll) {
       setSelectedUserIds((prev) => {
@@ -623,11 +592,41 @@ export default function NotificationPage() {
     setSelectAll(!selectAll);
     setSelectAllMatching(false);
   };
-
   const handleSelectAllMatchingChange = async () => {
     if (selectAllMatching) {
-      setSelectedUserIds(new Set());
-      setSelectAll(false);
+      // --- CHANGED: Only remove the IDs that match the current filter, not all selected IDs ---
+      try {
+        const response = await fetch(
+          `${api_startpoint}/api/notification_users_search_ids`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              search: searchTerm,
+              state: selectedState,
+              city: selectedCity,
+              school_name: selectedSchool,
+              grade: selectedGrade,
+              user_type: selectedUserType,
+              specific_user_id: specificUserId,
+              school_code: schoolCodeInput,
+            }),
+          }
+        );
+        if (!response.ok) throw new Error("Failed to fetch user IDs for unselecting");
+        const userIdsToRemove: number[] = await response.json();
+        
+        setSelectedUserIds((prev) => {
+          const newSet = new Set(prev);
+          userIdsToRemove.forEach(id => newSet.delete(id));
+          return newSet;
+        });
+        setSelectAll(false);
+      } catch (err) {
+        console.error("Error fetching user IDs to unselect:", err);
+        alert("Could not unselect all matching users. Please try again.");
+        return;
+      }
     } else {
       try {
         const response = await fetch(
@@ -648,8 +647,14 @@ export default function NotificationPage() {
           }
         );
         if (!response.ok) throw new Error("Failed to fetch user IDs");
-        const userIds: number[] = await response.json();
-        setSelectedUserIds(new Set(userIds));
+        const userIdsToAdd: number[] = await response.json();
+        
+        // --- CHANGED: Merge fetched IDs with existing selection ---
+        setSelectedUserIds((prev) => {
+          const newSet = new Set(prev);
+          userIdsToAdd.forEach(id => newSet.add(id));
+          return newSet;
+        });
         setSelectAll(false);
       } catch (err) {
         console.error("Error fetching all matching user IDs:", err);
@@ -661,7 +666,6 @@ export default function NotificationPage() {
     }
     setSelectAllMatching(!selectAllMatching);
   };
-
   // --- New Function: Fetch Users for Modal ---
   const fetchUsersForModal = async (userIds: number[]) => {
     try {
@@ -688,7 +692,6 @@ export default function NotificationPage() {
       setModalSelectedUsers([]);
     }
   };
-
   const openNotificationModal = async () => {
     if (selectedUserIds.size === 0) {
       alert("Please select at least one user.");
@@ -696,29 +699,37 @@ export default function NotificationPage() {
     }
     setIsModalOpen(true);
     setSendError(null);
-    
     // --- Reset coupon filter state when modal opens ---
     setShowAllCoupons(false); // Reset to filtered view on opening
-    
     // --- Fetch full user details for the modal ---
     await fetchUsersForModal(Array.from(selectedUserIds));
     // Note: fetchCoupons is now triggered by the useEffect that watches isModalOpen and fetchCoupons
   };
-
   const closeNotificationModal = () => {
     setIsModalOpen(false);
     setNotificationTitle("");
     setNotificationMessage("");
     setSendError(null);
     setSelectedCouponId(null); // Reset coupon selection
-    
     // --- Reset coupon filter state when modal closes ---
     setShowAllCoupons(false); // Reset to filtered view on closing
-    
     // Clear modal user data
     setModalSelectedUsers([]);
     setModalCurrentPage(1);
   };
+
+  // --- NEW FUNCTION: Uncheck All Users ---
+  const handleUncheckAllUsers = () => {
+    setSelectedUserIds(new Set());
+    setSelectAll(false);
+    setSelectAllMatching(false);
+    // setShowUncheckAll will be updated by the useEffect below
+  };
+
+  // --- NEW USEEFFECT: Control visibility of Uncheck All button ---
+  useEffect(() => {
+    setShowUncheckAll(selectedUserIds.size > 0);
+  }, [selectedUserIds]);
 
   // --- Modified: Check Coupon Redemption and Status ---
   const checkCouponRedemptionAndStatus = async () => {
@@ -731,7 +742,6 @@ export default function NotificationPage() {
     setSendError(null);
     try {
       const userIdsArray = Array.from(selectedUserIds);
-      
       // --- Step 1: Check if coupon exists for users (Redemption Check) ---
       const redemptionResponse = await fetch(
         `${api_startpoint}/api/notification_check_coupon_redemption`,
@@ -760,7 +770,6 @@ export default function NotificationPage() {
         setIsErrorModalOpen(true);
         return; // Stop the process
       }
-
       // --- Step 2: If Redemption Check passes, check status (only if showAllCoupons is true) ---
       if (showAllCoupons) {
         const statusResponse = await fetch(
@@ -775,12 +784,10 @@ export default function NotificationPage() {
           }
         );
         const statusResult = await statusResponse.json();
-        
         if (!statusResponse.ok) {
             // Handle unexpected error from backend
             throw new Error(statusResult.error || `Status check failed: ${statusResponse.status}`);
         }
-
         if (statusResult.success === false) {
             // Status check failed - show error modal for wrong status
             setErrorModalMessage(
@@ -793,7 +800,6 @@ export default function NotificationPage() {
         }
         // If status check passes, proceed to send notification
       }
-
       // If all checks pass (or if showAllCoupons is false and redemption check passes), proceed to send
       handleSendNotification();
     } catch (error) {
@@ -807,7 +813,6 @@ export default function NotificationPage() {
       setIsCheckingRedemption(false);
     }
   };
-
   // --- Modified: Handle Send Notification (now called by checkCouponRedemptionAndStatus) ---
   const handleSendNotification = async () => {
     if (!notificationTitle.trim() || !notificationMessage.trim()) {
@@ -848,9 +853,11 @@ export default function NotificationPage() {
       console.log("Notification sent successfully:", result);
       alert("Notification sent successfully!");
       closeNotificationModal();
+      // --- CHANGED: Clear selection after sending ---
       setSelectedUserIds(new Set());
       setSelectAll(false);
       setSelectAllMatching(false);
+      // setShowUncheckAll will be updated by the useEffect
     } catch (error) {
       const errorMessage =
         error instanceof Error
@@ -862,11 +869,9 @@ export default function NotificationPage() {
       setIsSending(false);
     }
   };
-
   // --- Pagination calculations ---
   const totalPages = Math.ceil(totalCount / itemsPerPage);
   const currentItems = users;
-
   // --- Pagination Controls Component ---
   const PaginationControls = ({
     currentPage,
@@ -937,7 +942,6 @@ export default function NotificationPage() {
       </div>
     </div>
   );
-
   useEffect(() => {
     if (currentItems.length === 0) {
       setSelectAll(false);
@@ -948,7 +952,6 @@ export default function NotificationPage() {
     );
     setSelectAll(allItemsOnPageSelected);
   }, [currentItems, selectedUserIds]);
-
   if (!isClient) {
     return (
       <div className={`page bg-light ${inter.className} font-sans`}>
@@ -981,7 +984,6 @@ export default function NotificationPage() {
       </div>
     );
   }
-
   return (
     <div className={`page bg-light ${inter.className} font-sans`}>
       <Sidebar />
@@ -1100,6 +1102,15 @@ export default function NotificationPage() {
                       )}
                     </div>
                     <div>
+                      {/* --- NEW: Uncheck All Users Button --- */}
+                      {showUncheckAll && (
+                        <button
+                          className="btn btn-outline-secondary btn-sm me-2"
+                          onClick={handleUncheckAllUsers}
+                        >
+                          Uncheck All Users
+                        </button>
+                      )}
                       <div className="form-check form-check-inline">
                         <input
                           className="form-check-input"
@@ -1221,7 +1232,6 @@ export default function NotificationPage() {
           </div>
         </div>
       </div>
-
       {/* --- Main Notification Modal --- */}
       {isModalOpen && (
         <div
@@ -1271,7 +1281,6 @@ export default function NotificationPage() {
                     placeholder="Enter notification message"
                   ></textarea>
                 </div>
-                
                 {/* --- Modified Coupon Dropdown --- */}
                 <div className="mb-3">
                   <label htmlFor="couponSelect" className="form-label">
@@ -1320,7 +1329,6 @@ export default function NotificationPage() {
                     )}
                   </select>
                 </div>
-                
                 <div className="mb-3">
                   <h6>Selected Users ({selectedUserIds.size}):</h6>
                   <div className="table-responsive">
@@ -1401,7 +1409,6 @@ export default function NotificationPage() {
         </div>
       )}
       {isModalOpen && <div className="modal-backdrop fade show"></div>}
-
       {/* --- Error Modal (Coupon Check Failed - Redemption or Status) --- */}
       {isErrorModalOpen && (
         <div
