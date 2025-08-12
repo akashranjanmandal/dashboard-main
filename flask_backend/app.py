@@ -2882,7 +2882,7 @@ def fetch_coupon_redeem_list():
     block = data.get('block', '')
     district = data.get('district', '')
     
-    # Updated SQL query to get school details from schools table
+    # Base SQL without WHERE clause
     sql = """
         SELECT 
             u.name AS 'Student Name', 
@@ -2904,12 +2904,13 @@ def fetch_coupon_redeem_list():
         INNER JOIN lifeapp.users u ON u.id = cr.user_id 
         INNER JOIN lifeapp.schools ls ON ls.id = u.school_id
         INNER JOIN lifeapp.coupons lc ON lc.id = cr.coupon_id
-        WHERE u.type = 3
-        ORDER BY cr.created_at DESC;
     """
-    filters = []
+    
+    # Start with base condition
+    conditions = ["u.type = 3"]
     params = []
 
+    # Search term handling
     if search:
         search_terms = search.strip().split()
         if search_terms:
@@ -2917,62 +2918,69 @@ def fetch_coupon_redeem_list():
             for term in search_terms:
                 name_conditions.append("u.name LIKE %s")
                 params.append(f"%{term}%")
-            filters.append(f"({' AND '.join(name_conditions)})")
+            conditions.append(f"({' AND '.join(name_conditions)})")
     
-    # Updated filters to use school fields
+    # Location/school filters
     if state:
-        filters.append("ls.state = %s")
+        conditions.append("ls.state = %s")
         params.append(state)
     if city:
-        filters.append("ls.city = %s")
+        conditions.append("ls.city = %s")
         params.append(city)
     if school:
-        filters.append("ls.name = %s")
+        conditions.append("ls.name = %s")
         params.append(school)
     if school_code:
-        filters.append("u.school_code = %s")
+        conditions.append("u.school_code = %s")
         params.append(school_code)
     if grade:
-        filters.append("u.grade = %s")
+        conditions.append("u.grade = %s")
         params.append(grade)
     if coupon_title:
-        filters.append("lc.title = %s")
+        conditions.append("lc.title = %s")
         params.append(coupon_title)
     if cluster:
-        filters.append("ls.cluster = %s")
+        conditions.append("ls.cluster = %s")
         params.append(cluster)
     if block:
-        filters.append("ls.block = %s")
+        conditions.append("ls.block = %s")
         params.append(block)
     if district:
-        filters.append("ls.district = %s")
+        conditions.append("ls.district = %s")
         params.append(district)
 
+    # Mobile number handling
     sanitized_mobile = ''.join(filter(str.isdigit, mobile))
     if sanitized_mobile:
         if len(sanitized_mobile) == 10:
-            filters.append("u.mobile_no = %s")
+            conditions.append("u.mobile_no = %s")
             params.append(sanitized_mobile)
         else:
-            filters.append("u.mobile_no LIKE %s")
+            conditions.append("u.mobile_no LIKE %s")
             params.append(f"%{sanitized_mobile}%")
         
+    # Date validation
     if start_date and end_date and start_date > end_date:
         return jsonify({'error': 'Start date cannot be after end date'}), 400
 
+    # Date filters
     if start_date and end_date:
-        filters.append("cr.created_at BETWEEN %s AND %s")
+        conditions.append("DATE(cr.created_at) BETWEEN %s AND %s")
         params.extend([start_date, end_date])
     elif start_date:
-        filters.append("cr.created_at >= %s")
+        conditions.append("DATE(cr.created_at) >= %s")
         params.append(start_date)
     elif end_date:
-        filters.append("cr.created_at <= %s")
+        conditions.append("DATE(cr.created_at) <= %s")
         params.append(end_date)
 
-    if filters:
-        sql += " AND " + " AND ".join(filters)
-        
+    # Build WHERE clause if we have any conditions
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+    
+    # Always add ordering at the end
+    sql += " ORDER BY cr.created_at DESC"
+
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
@@ -2980,6 +2988,8 @@ def fetch_coupon_redeem_list():
             result = cursor.fetchall()
         return jsonify(result)
     except Exception as e:
+        # Add logging here to see the generated SQL
+        app.logger.error(f"SQL Error: {e}\nGenerated SQL: {sql}\nParams: {params}")
         return jsonify({'error': str(e)}), 500
     finally:
         connection.close()
@@ -4754,6 +4764,7 @@ def fetch_teacher_coupon_redeem_list():
     block = data.get('block', '')
     district = data.get('district', '')
     
+    # Base SQL without WHERE clause
     sql = """
         SELECT 
             u.name AS 'Teacher Name', 
@@ -4774,12 +4785,13 @@ def fetch_teacher_coupon_redeem_list():
         INNER JOIN lifeapp.users u ON u.id = cr.user_id 
         INNER JOIN lifeapp.schools ls ON ls.id = u.school_id
         INNER JOIN lifeapp.coupons lc ON lc.id = cr.coupon_id
-        WHERE u.type = 5  # Filter for teachers
-        ORDER BY cr.created_at DESC;
     """
-    filters = []
+    
+    # Start with base condition for teachers
+    conditions = ["u.type = 5"]
     params = []
 
+    # Search term handling
     if search:
         search_terms = search.strip().split()
         if search_terms:
@@ -4787,59 +4799,66 @@ def fetch_teacher_coupon_redeem_list():
             for term in search_terms:
                 name_conditions.append("u.name LIKE %s")
                 params.append(f"%{term}%")
-            filters.append(f"({' AND '.join(name_conditions)})")
+            conditions.append(f"({' AND '.join(name_conditions)})")
     
-    # Updated to use school fields
+    # Location/school filters
     if state:
-        filters.append("ls.state = %s")
+        conditions.append("ls.state = %s")
         params.append(state)
     if city:
-        filters.append("ls.city = %s")
+        conditions.append("ls.city = %s")
         params.append(city)
     if school:
-        filters.append("ls.name = %s")
+        conditions.append("ls.name = %s")
         params.append(school)
     if coupon_title:
-        filters.append("lc.title = %s")
+        conditions.append("lc.title = %s")
         params.append(coupon_title)
     if school_code:
-        filters.append("u.school_code = %s")
+        conditions.append("u.school_code = %s")
         params.append(school_code)
     if cluster:
-        filters.append("ls.cluster = %s")
+        conditions.append("ls.cluster = %s")
         params.append(cluster)
     if block:
-        filters.append("ls.block = %s")
+        conditions.append("ls.block = %s")
         params.append(block)
     if district:
-        filters.append("ls.district = %s")
+        conditions.append("ls.district = %s")
         params.append(district)
 
+    # Mobile number handling
     sanitized_mobile = ''.join(filter(str.isdigit, mobile))
     if sanitized_mobile:
         if len(sanitized_mobile) == 10:
-            filters.append("u.mobile_no = %s")
+            conditions.append("u.mobile_no = %s")
             params.append(sanitized_mobile)
         else:
-            filters.append("u.mobile_no LIKE %s")
+            conditions.append("u.mobile_no LIKE %s")
             params.append(f"%{sanitized_mobile}%")
             
+    # Date validation
     if start_date and end_date and start_date > end_date:
         return jsonify({'error': 'Start date cannot be after end date'}), 400
 
+    # Date filters (using DATE() for safer comparisons)
     if start_date and end_date:
-        filters.append("cr.created_at BETWEEN %s AND %s")
+        conditions.append("DATE(cr.created_at) BETWEEN %s AND %s")
         params.extend([start_date, end_date])
     elif start_date:
-        filters.append("cr.created_at >= %s")
+        conditions.append("DATE(cr.created_at) >= %s")
         params.append(start_date)
     elif end_date:
-        filters.append("cr.created_at <= %s")
+        conditions.append("DATE(cr.created_at) <= %s")
         params.append(end_date)
 
-    if filters:
-        sql += " AND " + " AND ".join(filters)
-        
+    # Build WHERE clause if we have conditions
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+    
+    # Add ordering at the end
+    sql += " ORDER BY cr.created_at DESC"
+
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
@@ -4847,10 +4866,13 @@ def fetch_teacher_coupon_redeem_list():
             result = cursor.fetchall()
         return jsonify(result)
     except Exception as e:
+        # Add detailed error logging for debugging
+        app.logger.error(f"SQL Error in teacher search: {str(e)}")
+        app.logger.error(f"Generated SQL: {sql}")
+        app.logger.error(f"Parameters: {params}")
         return jsonify({'error': str(e)}), 500
     finally:
         connection.close()
-
 
 
 @app.route('/api/teacher_school_codes', methods=['GET'])
