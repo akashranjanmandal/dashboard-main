@@ -350,6 +350,11 @@ export function Sidebar() {
                     label="Lesson Plans"
                     isNested
                   />
+                  <NavItem
+                    href="/teachers/textbook_mappings"
+                    label="Textbook Mappings"
+                    isNested
+                  />
                 </div>
               )}
             </div>
