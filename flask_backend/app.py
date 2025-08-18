@@ -11579,6 +11579,7 @@ def list_campaigns():
                     WHEN c.game_type = 1 THEN 'Mission'
                     WHEN c.game_type = 2 THEN 'Quiz'
                     WHEN c.game_type = 7 THEN 'Vision'
+                    WHEN c.game_type = 8 THEN 'Mentor Session'
                     ELSE 'Other'
                 END AS game_type_title,
                 c.reference_id,
@@ -11789,7 +11790,7 @@ def mission_list():
     subject_id = data.get('subject_id')
     level_id   = data.get('level_id')
 
-    print(f"📥 /api/mission_list request subject_id={subject_id}, level_id={level_id}")
+    print(f" /api/mission_list request subject_id={subject_id}, level_id={level_id}")
 
     conn = get_db_connection()
     try:
@@ -11808,14 +11809,14 @@ def mission_list():
                 sql += " AND la_level_id=%s"
                 params.append(level_id)
             
-            print(f"📝 Final SQL: {sql} with params: {params}")
+            print(f" Final SQL: {sql} with params: {params}")
             cursor.execute(sql, params)
             items = cursor.fetchall()
 
         return jsonify(items), 200
     finally:
         conn.close()
-        print("🔚 DB connection closed.")
+        print(" DB connection closed.")
 
 @app.route('/api/vision_list', methods=['POST'])
 def vision_list():
@@ -11910,6 +11911,9 @@ def get_campaign_details(id):
                 return jsonify(stats), 200
             elif game_type == 2:
                 stats = handle_quiz_details(conn, cursor, reference_id, start_date, campaign, school_code)
+                return jsonify(stats), 200
+            elif game_type == 8:
+                stats = handle_mentor_session_details(conn, cursor, reference_id)
                 return jsonify(stats), 200
             else:
                 return jsonify({
@@ -12082,6 +12086,37 @@ def handle_quiz_details(conn, cursor, topic_id, start_date, campaign, school_cod
         'total_submission': result['total_submission'] or 0,
         'total_coins_earned': result['total_coins_earned'] or 0
     }
-    
+
+def handle_mentor_session_details(conn, cursor, session_participant_id):
+    """
+    Calculate statistics for Mentor Session campaigns (Type 8).
+    Counts distinct users who joined the session referenced by reference_id 
+    (which corresponds to la_session_participants.id).
+    """
+    try:
+        # Count distinct user_ids from la_session_participants 
+        # where la_session_id matches the reference_id (interpreted as session_participant_id)
+        sql = """
+            SELECT COUNT(DISTINCT user_id) AS total_submission
+            FROM la_session_participants
+            WHERE la_session_id = %s
+        """
+        cursor.execute(sql, (session_participant_id,))
+        result = cursor.fetchone()
+        
+        total_submission = result['total_submission'] if result and result['total_submission'] else 0
+        
+        return {
+            'total_submission': total_submission,
+            'total_coins_earned': 0  # Assuming no coins for Mentor Sessions
+        }
+    except Exception as e:
+        logger.error(f"Error in handle_mentor_session_details: {str(e)}")
+        # Return default values on error
+        return {
+            'total_submission': 0,
+            'total_coins_earned': 0
+        }
+
 if __name__ == '__main__':
     app.run(debug=True,  use_reloader=True)
