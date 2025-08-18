@@ -3,15 +3,11 @@ import React, { useState, useEffect } from "react";
 import { Inter } from "next/font/google";
 import { Sidebar } from "@/components/ui/sidebar";
 import "@tabler/core/dist/css/tabler.min.css";
-import {
-  IconEdit,
-  IconPlus,
-  IconTrash,
-  IconInfoCircle,
-} from "@tabler/icons-react";
+import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
 import AddCampaignModal from "./AddCampaignModal";
-
 const inter = Inter({ subsets: ["latin"] });
+
+// const api_startpoint = "http://152.42.239.141:5000";
 // const api_startpoint = "http://localhost:5000";
 const api_startpoint = "http://152.42.239.141:5000";
 
@@ -30,11 +26,7 @@ interface Campaign {
   created_at: string;
   updated_at: string;
   status?: number;
-  la_subject_id?: number | null;
-  la_level_id?: number | null;
-  topic_id?: number;
 }
-
 interface CampaignStats {
   total_submission: number;
   total_approved?: number;
@@ -42,7 +34,6 @@ interface CampaignStats {
   total_requested?: number;
   total_coins_earned: number;
 }
-
 export default function Campaigns() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(false);
@@ -66,8 +57,7 @@ export default function Campaigns() {
   const [campaignToDelete, setCampaignToDelete] = useState<Campaign | null>(
     null
   );
-  const [schoolCode, setSchoolCode] = useState(""); // New state for school code filter
-
+  const [schoolCode, setSchoolCode] = useState("");
   const fetchCampaigns = async (page = 1) => {
     setLoading(true);
     try {
@@ -83,15 +73,11 @@ export default function Campaigns() {
       setLoading(false);
     }
   };
-
-  // Updated to accept school code parameter
   const fetchCampaignStats = async (campaignId: number, code: string) => {
     setDetailsModal((prev) => ({ ...prev, loading: true }));
     try {
       const qs = new URLSearchParams();
-      if (code) {
-        qs.append("school_code", code);
-      }
+      if (code) qs.append("school_code", code);
       const res = await fetch(
         `${api_startpoint}/api/campaigns/${campaignId}/details?${qs}`
       );
@@ -103,18 +89,15 @@ export default function Campaigns() {
       setDetailsModal((prev) => ({ ...prev, loading: false }));
     }
   };
-
   useEffect(() => {
     fetchCampaigns();
   }, []);
-
   const openAdd = () => setModal({ mode: "add" });
   const openEdit = (camp: Campaign) =>
     setModal({ mode: "edit", campaign: camp });
   const closeModal = () => setModal(false);
-
   const openDetails = (campaign: Campaign) => {
-    setSchoolCode(""); // Reset school code when opening new details
+    setSchoolCode("");
     setDetailsModal({
       open: true,
       campaign,
@@ -123,7 +106,6 @@ export default function Campaigns() {
     });
     fetchCampaignStats(campaign.id, "");
   };
-
   const closeDetails = () =>
     setDetailsModal({
       open: false,
@@ -131,7 +113,6 @@ export default function Campaigns() {
       stats: null,
       loading: false,
     });
-
   const handleDelete = async (id: number) => {
     if (!campaignToDelete) return;
     await fetch(`${api_startpoint}/api/campaigns/${id}`, { method: "DELETE" });
@@ -139,12 +120,10 @@ export default function Campaigns() {
     setShowDeleteModal(false);
     setCampaignToDelete(null);
   };
-
   const confirmDelete = (campaign: Campaign) => {
     setCampaignToDelete(campaign);
     setShowDeleteModal(true);
   };
-
   return (
     <div className={`page bg-body ${inter.className} font-sans`}>
       <Sidebar />
@@ -157,7 +136,6 @@ export default function Campaigns() {
                 <IconPlus className="me-2" /> Add Campaign
               </button>
             </div>
-
             {loading ? (
               <div className="text-center py-10">
                 <div
@@ -210,7 +188,7 @@ export default function Campaigns() {
                             <span className="text-muted">—</span>
                           )}
                         </td>
-                        <td>{c.reference_title}</td>
+                        <td>{c.reference_title || "—"}</td>
                         <td>{c.campaign_title}</td>
                         <td>{c.description}</td>
                         <td>{c.status == 1 ? "active" : "inactive"}</td>
@@ -232,10 +210,20 @@ export default function Campaigns() {
                           </button>
                         </td>
                         <td className="flex gap-2">
-                          <IconEdit
-                            className="cursor-pointer"
-                            onClick={() => openEdit(c)}
-                          />
+                          {/* Disable Edit for Mentor Session (Type 8) */}
+                          {c.game_type === 8 ? (
+                            <span
+                              className="text-muted"
+                              title="Editing not supported for Mentor Sessions"
+                            >
+                              <IconEdit className="opacity-50" />
+                            </span>
+                          ) : (
+                            <IconEdit
+                              className="cursor-pointer"
+                              onClick={() => openEdit(c)}
+                            />
+                          )}
                           <IconTrash
                             className="cursor-pointer text-red-600"
                             onClick={() => confirmDelete(c)}
@@ -245,7 +233,6 @@ export default function Campaigns() {
                     ))}
                   </tbody>
                 </table>
-
                 <div className="flex items-center gap-2 mt-4">
                   <button
                     className="btn"
@@ -254,11 +241,9 @@ export default function Campaigns() {
                   >
                     Previous
                   </button>
-
                   <span>
                     Page {page} of {Math.ceil(total / 25)}
                   </span>
-
                   <button
                     className="btn"
                     disabled={page * 25 >= total}
@@ -270,7 +255,6 @@ export default function Campaigns() {
               </div>
             )}
           </div>
-
           {modal && (
             <AddCampaignModal
               mode={modal.mode}
@@ -281,7 +265,6 @@ export default function Campaigns() {
               }}
             />
           )}
-
           {detailsModal.open && (
             <div
               className="modal d-block"
@@ -301,7 +284,6 @@ export default function Campaigns() {
                     ></button>
                   </div>
                   <div className="modal-body">
-                    {/* School Code Filter */}
                     <div className="mb-4">
                       <label className="form-label">School Code Filter</label>
                       <div className="input-group">
@@ -315,24 +297,18 @@ export default function Campaigns() {
                         <button
                           className="btn btn-outline-primary"
                           type="button"
-                          onClick={() => {
-                            if (detailsModal.campaign) {
-                              fetchCampaignStats(
-                                detailsModal.campaign.id,
-                                schoolCode
-                              );
-                            }
-                          }}
+                          onClick={() =>
+                            detailsModal.campaign &&
+                            fetchCampaignStats(
+                              detailsModal.campaign.id,
+                              schoolCode
+                            )
+                          }
                         >
                           Apply
                         </button>
                       </div>
-                      <div className="form-text">
-                        Filter stats by school code (leave blank for all
-                        schools)
-                      </div>
                     </div>
-
                     {detailsModal.loading ? (
                       <div className="text-center py-4">
                         <div
@@ -346,34 +322,55 @@ export default function Campaigns() {
                       </div>
                     ) : detailsModal.stats ? (
                       <div className="space-y-3">
-                        <div className="d-flex justify-content-between">
-                          <span className="fw-bold">Total Participants:</span>
-                          <span>{detailsModal.stats.total_submission}</span>
-                        </div>
-
-                        {detailsModal.campaign?.game_type !== 2 && (
+                        {/* Simplified stats for Mentor Session (Type 8) */}
+                        {detailsModal.campaign?.game_type === 8 ? (
+                          <div className="d-flex justify-content-between">
+                            <span className="fw-bold">Total Participants:</span>
+                            <span>{detailsModal.stats.total_submission}</span>
+                          </div>
+                        ) : (
+                          // Standard stats for other types
                           <>
                             <div className="d-flex justify-content-between">
-                              <span className="fw-bold">Approved:</span>
-                              <span>{detailsModal.stats.total_approved}</span>
+                              <span className="fw-bold">
+                                Total Participants Booked:
+                              </span>
+                              <span>{detailsModal.stats.total_submission}</span>
                             </div>
-                            <div className="d-flex justify-content-between">
-                              <span className="fw-bold">Rejected:</span>
-                              <span>{detailsModal.stats.total_rejected}</span>
-                            </div>
-                            <div className="d-flex justify-content-between">
-                              <span className="fw-bold">Pending Review:</span>
-                              <span>{detailsModal.stats.total_requested}</span>
+                            {detailsModal.campaign?.game_type !== 2 && (
+                              <>
+                                <div className="d-flex justify-content-between">
+                                  <span className="fw-bold">Approved:</span>
+                                  <span>
+                                    {detailsModal.stats.total_approved}
+                                  </span>
+                                </div>
+                                <div className="d-flex justify-content-between">
+                                  <span className="fw-bold">Rejected:</span>
+                                  <span>
+                                    {detailsModal.stats.total_rejected}
+                                  </span>
+                                </div>
+                                <div className="d-flex justify-content-between">
+                                  <span className="fw-bold">
+                                    Pending Review:
+                                  </span>
+                                  <span>
+                                    {detailsModal.stats.total_requested}
+                                  </span>
+                                </div>
+                              </>
+                            )}
+                            <div className="d-flex justify-content-between border-top pt-2">
+                              <span className="fw-bold">
+                                Total Coins Earned:
+                              </span>
+                              <span className="text-success fw-bold">
+                                {detailsModal.stats.total_coins_earned}
+                              </span>
                             </div>
                           </>
                         )}
-
-                        <div className="d-flex justify-content-between border-top pt-2">
-                          <span className="fw-bold">Total Coins Earned:</span>
-                          <span className="text-success fw-bold">
-                            {detailsModal.stats.total_coins_earned}
-                          </span>
-                        </div>
                       </div>
                     ) : (
                       <div className="text-center py-4 text-danger">
@@ -394,8 +391,6 @@ export default function Campaigns() {
               </div>
             </div>
           )}
-
-          {/* Delete Confirmation Modal */}
           {showDeleteModal && campaignToDelete && (
             <div
               className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50"
