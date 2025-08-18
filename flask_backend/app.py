@@ -2056,6 +2056,7 @@ def vision_teacher_completions_summary():
     finally:
         conn.close()
         
+
 ###################################################################################
 ###################################################################################
 ######################## STUDENT/ DASHBOARD APIs ##################################
@@ -5600,6 +5601,313 @@ def delete_lesson_plan(lp_id):
     finally:
         conn.close()
 
+###################################################################################
+###################################################################################
+######################## TEACHER / TEXTBOOK MAPPINGS APIs #########################
+###################################################################################
+###################################################################################
+
+# Textbook Mapping Boards
+@app.route('/api/textbook_mapping_boards', methods=['GET'])
+def get_textbook_mapping_boards():
+    sql = "SELECT id, name FROM lifeapp.la_boards"
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute(sql)
+            result = cursor.fetchall()
+            return jsonify(result if result else [])
+    except Exception as e:
+        print("Error fetching boards:", str(e))
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
+# Textbook Mapping Languages
+@app.route('/api/textbook_mapping_languages', methods=['GET'])
+def get_textbook_mapping_languages():
+    sql = "SELECT id, title AS name FROM lifeapp.languages"
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute(sql)
+            result = cursor.fetchall()
+            return jsonify(result if result else [])
+    except Exception as e:
+        print("Error fetching languages:", str(e))
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
+# Textbook Mapping Subjects
+@app.route('/api/textbook_mapping_subjects', methods=['GET'])
+def get_textbook_mapping_subjects():
+    sql = "SELECT id, title AS name FROM lifeapp.la_subjects"
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute(sql)
+            result = cursor.fetchall()
+            return jsonify(result if result else [])
+    except Exception as e:
+        print("Error fetching subjects:", str(e))
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
+# Textbook Mapping Grades
+@app.route('/api/textbook_mapping_grades', methods=['GET'])
+def get_textbook_mapping_grades():
+    sql = "SELECT id, name FROM lifeapp.la_grades"
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute(sql)
+            result = cursor.fetchall()
+            return jsonify(result if result else [])
+    except Exception as e:
+        print("Error fetching grades:", str(e))
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
+# Textbook Mappings Search
+@app.route('/api/textbook_mappings_search', methods=['POST'])
+def fetch_textbook_mappings_search():
+    filters = request.get_json() or {}
+    board = filters.get('board')
+    language = filters.get('language')
+    subject = filters.get('subject')
+    grade = filters.get('grade')
+    status = filters.get('status')
+    title = filters.get('title')
+
+    sql = """
+        SELECT 
+            tm.id,
+            b.name AS board,
+            l.title AS language,
+            s.title AS subject,
+            g.name AS grade,
+            tm.title,
+            CASE
+                WHEN tm.status = 1 THEN 'Published'
+                ELSE 'Drafted'
+            END AS status,
+            m.path AS media_path
+        FROM lifeapp.la_pbl_textbook_mappings tm
+        LEFT JOIN lifeapp.la_boards b ON b.id = tm.la_board_id
+        LEFT JOIN lifeapp.languages l ON l.id = tm.language_id
+        LEFT JOIN lifeapp.la_subjects s ON s.id = tm.la_subject_id
+        LEFT JOIN lifeapp.la_grades g ON g.id = tm.la_grade_id
+        LEFT JOIN lifeapp.media m ON m.id = tm.document_id
+        """
+
+    where_clauses = []
+    params = []
+
+    if board and board.strip():
+        where_clauses.append("b.name = %s")
+        params.append(board)
+    if language and language.strip():
+        where_clauses.append("l.title = %s")
+        params.append(language)
+    if subject and subject.strip():
+        where_clauses.append("s.title = %s")
+        params.append(subject)
+    if grade and grade.strip():
+        where_clauses.append("g.name = %s")
+        params.append(grade)
+    if status and status.strip():
+        where_clauses.append("tm.status = %s")
+        params.append(1 if status == "Published" else 0)
+    if title and title.strip():
+        where_clauses.append("tm.title LIKE %s")
+        params.append(f"%{title}%")
+
+    if where_clauses:
+        sql += " WHERE " + " AND ".join(where_clauses)
+
+    sql += " ORDER BY tm.updated_at DESC"
+
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute(sql, tuple(params))
+            result = cursor.fetchall()
+            
+        base_url = os.getenv('BASE_URL')
+        for r in result:
+            r['media_url'] = f"{base_url}/{r['media_path']}" if r.get('media_path') else None
+            
+        return jsonify(result if result else []), 200
+    except Exception as e:
+        print("Error in textbook_mappings_search:", str(e))
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
+# Update Textbook Mapping
+@app.route('/api/update_textbook_mapping', methods=['POST'])
+def update_textbook_mapping():
+    form = request.form
+    file = request.files.get('media')
+    media_id = None
+    
+    if file and file.filename:
+        media = upload_media(file)
+        media_id = media['id']
+
+    try:
+        mapping_id = int(form['id'])
+        board_id = int(form['board_id'])
+        language_id = int(form['language_id'])
+        subject_id = int(form['subject_id'])
+        grade_id = int(form['grade_id'])
+        status_val = int(form['status'])
+    except:
+        return jsonify({'error':'Missing or invalid IDs'}),400
+
+    if media_id:
+        sql = """
+          UPDATE lifeapp.la_pbl_textbook_mappings
+          SET la_board_id=%s,
+              language_id=%s,
+              la_subject_id=%s,
+              la_grade_id=%s,
+              title=%s,
+              document_id=%s,
+              status=%s,
+              updated_at=NOW()
+          WHERE id=%s
+        """
+        params = (
+            board_id, language_id, subject_id, grade_id, 
+            form.get('title'), media_id, status_val, mapping_id
+        )
+    else:
+        sql = """
+          UPDATE lifeapp.la_pbl_textbook_mappings
+          SET la_board_id=%s,
+              language_id=%s,
+              la_subject_id=%s,
+              la_grade_id=%s,
+              title=%s,
+              status=%s,
+              updated_at=NOW()
+          WHERE id=%s
+        """
+        params = (
+            board_id, language_id, subject_id, grade_id, 
+            form.get('title'), status_val, mapping_id
+        )
+
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+        conn.commit()
+        return jsonify({'message':'Textbook mapping updated'}),200
+    except Exception as e:
+        print("Error updating textbook mapping:", str(e))
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+# Add Textbook Mapping
+@app.route('/api/add_textbook_mapping', methods=['POST'])
+def add_textbook_mapping():
+    form = request.form
+    file = request.files.get('media')
+    
+    if not file or not file.filename:
+        return jsonify({'error':'Document file is required'}), 400
+        
+    media = upload_media(file)
+    media_id = media['id']
+
+    try:
+        board_id = int(form['board_id'])
+        language_id = int(form['language_id'])
+        subject_id = int(form['subject_id'])
+        grade_id = int(form['grade_id'])
+        status_val = int(form['status'])
+    except:
+        return jsonify({'error':'Invalid form data'}), 400
+
+    sql = """
+      INSERT INTO lifeapp.la_pbl_textbook_mappings
+        (la_board_id, language_id, la_subject_id, la_grade_id, 
+         title, document_id, status, created_at, updated_at)
+      VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+    """
+    params = (
+        board_id,
+        language_id,
+        subject_id,
+        grade_id,
+        form.get('title','').strip(),
+        media_id,
+        status_val
+    )
+    
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            new_id = cur.lastrowid
+        conn.commit()
+        return jsonify({'id': new_id}), 201
+    except Exception as e:
+        print("Error adding textbook mapping:", str(e))
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+# Delete Textbook Mapping
+@app.route('/api/delete_textbook_mapping/<int:mapping_id>', methods=['DELETE'])
+def delete_textbook_mapping(mapping_id):
+    try:
+        conn = get_db_connection()
+        # Fetch media record
+        with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            cur.execute("""
+              SELECT document_id AS media_id, m.path AS media_path
+              FROM lifeapp.la_pbl_textbook_mappings tm
+              LEFT JOIN lifeapp.media m ON tm.document_id=m.id
+              WHERE tm.id=%s
+            """, (mapping_id,))
+            row = cur.fetchone()
+
+        # Delete textbook mapping
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM lifeapp.la_pbl_textbook_mappings WHERE id=%s", (mapping_id,))
+
+        # Delete media record + S3 object if exists
+        if row and row['media_id']:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM lifeapp.media WHERE id=%s", (row['media_id'],))
+            conn.commit()
+            s3 = boto3.client(
+                's3',
+                region_name=DO_SPACES_REGION,
+                endpoint_url=DO_SPACES_ENDPOINT,
+                aws_access_key_id=DO_SPACES_KEY,
+                aws_secret_access_key=DO_SPACES_SECRET
+            )
+            try:
+                s3.delete_object(Bucket=DO_SPACES_BUCKET, Key=row['media_path'])
+            except Exception as e:
+                print("Error deleting S3 object:", str(e))
+
+        conn.commit()
+        return jsonify({'message':'Deleted successfully'}),200
+    except Exception as e:
+        print("Error deleting textbook mapping:", str(e))
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+        
 ###################################################################################
 ###################################################################################
 ######################## TEACHER / WORKSHEET APIs ###############################$#
