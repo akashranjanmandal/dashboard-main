@@ -7311,7 +7311,7 @@ def upload_mentors_csv():
 ###################################################################################
 ###################################################################################
 
-@app.route('/api/sessions', methods=['GET']) # Ensure it handles GET
+@app.route('/api/sessions', methods=['POST']) # Ensure it handles GET
 def get_sessions():
     """Fetch all mentor sessions with user name, heading, description, and status."""
     try:
