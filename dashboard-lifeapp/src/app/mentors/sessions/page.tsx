@@ -94,9 +94,8 @@ export default function MentorSessions() {
   const fetchSessions = async () => {
     setLoading(true);
     try {
-      // Make the API request (GET method, no pagination params)
       const res = await fetch(`${api_startpoint}/api/sessions`, {
-        method: "GET", // Backend now supports GET
+        method: "POST",
       });
 
       if (!res.ok) {
