@@ -325,7 +325,7 @@ export default function Campaigns() {
                         {/* Simplified stats for Mentor Session (Type 8) */}
                         {detailsModal.campaign?.game_type === 8 ? (
                           <div className="d-flex justify-content-between">
-                            <span className="fw-bold">Total Participants:</span>
+                            <span className="fw-bold">Total Participants Booked:</span>
                             <span>{detailsModal.stats.total_submission}</span>
                           </div>
                         ) : (
@@ -333,7 +333,7 @@ export default function Campaigns() {
                           <>
                             <div className="d-flex justify-content-between">
                               <span className="fw-bold">
-                                Total Participants Booked:
+                                Total Participants:
                               </span>
                               <span>{detailsModal.stats.total_submission}</span>
                             </div>
