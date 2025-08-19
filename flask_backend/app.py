@@ -7310,21 +7310,27 @@ def upload_mentors_csv():
 ######################## MENTORS/SESSIONS APIs ###################################
 ###################################################################################
 ###################################################################################
-@app.route('/api/sessions', methods=['POST'])
+
+@app.route('/api/sessions', methods=['GET']) # Ensure it handles GET
 def get_sessions():
-    """Fetch all mentor sessions with user name and status."""
+    """Fetch all mentor sessions with user name, heading, description, and status."""
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
+            # --- Updated SQL query to include description ---
             sql = """
                 SELECT 
                     las.id,
-                    u.name,
+                    las.user_id,
+                    u.name, -- Fetch mentor name
                     las.heading,
+                    las.description, -- Include description
                     las.zoom_link,
                     las.zoom_password,
                     las.date_time,
-                    las.status
+                    las.status,
+                    las.created_at,
+                    las.updated_at
                 FROM 
                     lifeapp.la_sessions las
                 INNER JOIN 
@@ -7336,34 +7342,93 @@ def get_sessions():
 
         return jsonify(sessions), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"Error in get_sessions: {e}") # Log the error
+        return jsonify({'error': 'Internal server error'}), 500
     finally:
-        connection.close()
+        if connection: # Check if connection exists before closing
+            connection.close()
+
 
 @app.route('/api/update_session', methods=['POST'])
 def update_session():
     """Update an existing session's heading, description, and status."""
     try:
         data = request.get_json()
+        if not data:
+             return jsonify({'error': 'Invalid JSON data'}), 400
+
         session_id = data.get('id')
         heading = data.get('heading')
-        description = data.get('description')
+        description = data.get('description') # Get description
         status = data.get('status')
+
+        # --- Validate required fields ---
+        if session_id is None:
+            return jsonify({'error': 'Session ID is required'}), 400
+        if heading is None: # Assuming heading is required
+             return jsonify({'error': 'Heading is required'}), 400
+
+        # --- Ensure status is an integer (0 or 1) ---
+        try:
+            status_int = int(status) if status is not None else 1 # Default to 1 if not provided
+            if status_int not in [0, 1]:
+                 return jsonify({'error': 'Status must be 0 (inactive) or 1 (active)'}), 400
+        except (ValueError, TypeError):
+             return jsonify({'error': 'Status must be a valid integer (0 or 1)'}), 400
 
         connection = get_db_connection()
         with connection.cursor() as cursor:
+            # --- SQL to update session ---
+            # Note: We update description and status, heading is assumed required
             sql = """
                 UPDATE lifeapp.la_sessions
-                SET heading = %s, description = %s, status = %s
+                SET heading = %s, description = %s, status = %s, updated_at = NOW() -- Update timestamp
                 WHERE id = %s
             """
-            cursor.execute(sql, (heading, description, status, session_id))
+            # Execute the update query
+            cursor.execute(sql, (heading, description, status_int, session_id))
             connection.commit()
+
+            # Check if any row was actually updated
+            if cursor.rowcount == 0:
+                 return jsonify({'error': 'Session not found or no changes made'}), 404
+
         return jsonify({'message': 'Session updated successfully'}), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"Error in update_session: {e}") # Log the error
+        return jsonify({'error': 'Internal server error'}), 500
     finally:
-        connection.close()
+        if connection: # Check if connection exists before closing
+            connection.close()
+
+@app.route('/api/delete_session/<int:session_id>', methods=['DELETE'])
+def delete_session(session_id):
+    """Delete a mentor session by its ID."""
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            # Optional: Check if session exists before deleting
+            # cursor.execute("SELECT id FROM lifeapp.la_sessions WHERE id = %s", (session_id,))
+            # if not cursor.fetchone():
+            #     return jsonify({'error': 'Session not found'}), 404
+
+            # Delete the session
+            sql = "DELETE FROM lifeapp.la_sessions WHERE id = %s"
+            cursor.execute(sql, (session_id,))
+            connection.commit()
+
+            # Check if any row was actually deleted
+            if cursor.rowcount == 0:
+                 return jsonify({'error': 'Session not found'}), 404
+
+        return jsonify({'message': 'Session deleted successfully'}), 200
+    except Exception as e:
+        print(f"Error in delete_session: {e}") # Log the error
+        return jsonify({'error': 'Internal server error'}), 500
+    finally:
+        if connection: # Check if connection exists before closing
+            connection.close()
+
 
 @app.route('/api/session_participants', methods=['POST'])
 def get_session_participants():
