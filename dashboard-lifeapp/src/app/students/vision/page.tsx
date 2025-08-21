@@ -1019,7 +1019,7 @@ export default function VisionSessionsPage() {
                                 <th scope="col">Question</th>
                                 <th scope="col">Options</th>
                                 <th scope="col">Correct Answer</th>
-                                <th scope="col">Student's Answer</th>
+                                <th scope="col">Student&apos;s Answer</th>
                                 {/* Status column removed */}
                               </tr>
                             </thead>
