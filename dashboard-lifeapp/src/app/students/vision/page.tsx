@@ -1,31 +1,70 @@
 "use client";
-import React, { useEffect, useState, ChangeEvent, FormEvent } from "react";
+import React, { useEffect, useState } from "react";
 import { Inter } from "next/font/google";
 import "@tabler/core/dist/css/tabler.min.css";
 import { Sidebar } from "@/components/ui/sidebar";
-import { Download, Search, XCircle } from "lucide-react";
-import { IconCircleCheck, IconCircleX } from "@tabler/icons-react"; // Added icons for modal
+import { Download, Search, XCircle, Eye, Play } from "lucide-react";
+import { IconCircleCheck, IconCircleX } from "@tabler/icons-react";
 
 const inter = Inter({ subsets: ["latin"] });
-// const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
-// const api_startpoint = 'http://localhost:5000'
-const api_startpoint = "http://152.42.239.141:5000";
 
+const api_startpoint = "http://152.42.239.141:5000";
+// const api_startpoint = "http://localhost:5000";
+
+// Interfaces for type safety (same as before)
 interface SessionRow {
   [key: string]: any;
-  answer_id: number;
+  answer_id: number | null;
+  vision_id: number;
   vision_title: string;
   question_title: string;
   user_name: string;
   teacher_name: string;
-  answer_text: string;
-  answer_option: string;
+  answer_text: string | null;
+  answer_option: string | null;
   media_id: number | null;
   media_path: string | null;
   score: number | null;
   answer_type: string;
+  status: string;
   created_at: string;
+  vision_youtube_url: string | null;
   media_url?: string;
+  user_id?: number;
+  representative_answer_id?: number;
+}
+
+interface VisionDetails {
+  vision_id: number;
+  title: string;
+  description: string;
+  youtube_url: string | null;
+  allow_for: number;
+  subject: string;
+  level: string;
+  status: number;
+  index: number;
+  questions: QuestionDetails[];
+}
+
+interface QuestionDetails {
+  question_id: number;
+  question_type: string;
+  question: string;
+  options: { [key: string]: string } | null;
+  correct_answer: string | null;
+}
+
+interface MCQAnswer {
+  answer_id: number;
+  question_id: number;
+  answer_option: string;
+  score: number | null;
+  status: string;
+  created_at: string;
+  question_text: string;
+  options: { [key: string]: string } | null;
+  correct_answer: string | null;
 }
 
 export default function VisionSessionsPage() {
@@ -39,15 +78,27 @@ export default function VisionSessionsPage() {
   const [loading, setLoading] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [inputCode, setInputCode] = useState("");
-  const [filterStatus, setFilterStatus] = useState(""); // '', 'requested','approved','rejected'
-  // Update existing state declaration
+  const [filterStatus, setFilterStatus] = useState("");
   const [selectedSchoolCode, setSelectedSchoolCode] = useState<string[]>([]);
 
-  // NEW: State for confirmation modal
   const [confirmationModal, setConfirmationModal] = useState({
     show: false,
-    type: "", // "approve" or "reject"
+    type: "",
     message: "",
+  });
+
+  const [visionDetailsModal, setVisionDetailsModal] = useState({
+    show: false,
+    details: null as VisionDetails | null,
+    loading: false,
+  });
+
+  const [mcqAnswersModal, setMcqAnswersModal] = useState({
+    show: false,
+    answers: [] as MCQAnswer[],
+    loading: false,
+    visionTitle: "",
+    userName: "",
   });
 
   const fetchSessions = async () => {
@@ -60,19 +111,23 @@ export default function VisionSessionsPage() {
     if (dateStart) params.set("date_start", dateStart);
     if (dateEnd) params.set("date_end", dateEnd);
     if (filterStatus) params.set("status", filterStatus);
-
-    // append each code separately
     selectedSchoolCode.forEach((code) => params.append("school_codes", code));
 
-    const res = await fetch(`${api_startpoint}/api/vision_sessions?${params}`);
-    const result = await res.json();
-    // Ensure data is an array
-    const sessions = Array.isArray(result.data) ? result.data : [];
-    setRows(sessions);
-    setLoading(false);
+    try {
+      const res = await fetch(
+        `${api_startpoint}/api/vision_sessions?${params}`
+      );
+      const result = await res.json();
+      const sessions = Array.isArray(result.data) ? result.data : [];
+      setRows(sessions);
+    } catch (error) {
+      console.error("Error fetching sessions:", error);
+      alert("Failed to load sessions.");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Trigger fetch on filters change
   useEffect(() => {
     fetchSessions();
   }, [
@@ -85,13 +140,11 @@ export default function VisionSessionsPage() {
     selectedSchoolCode,
   ]);
 
-  // Called when "Search" button clicked
   const handleSearch = () => {
     setPage(1);
     fetchSessions();
   };
 
-  // Reset all filters
   const handleClear = () => {
     setQtype("");
     setAssignedBy("");
@@ -106,52 +159,110 @@ export default function VisionSessionsPage() {
   const handleScoreBlur = async (id: number, value: string) => {
     const newScore = Number(value);
     if (!isNaN(newScore)) {
-      await fetch(`${api_startpoint}/api/vision_sessions/${id}/score`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ score: newScore }),
-      });
-      fetchSessions();
+      try {
+        await fetch(`${api_startpoint}/api/vision_sessions/${id}/score`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ score: newScore }),
+        });
+        fetchSessions();
+      } catch (error) {
+        console.error("Error updating score:", error);
+        alert("Failed to update score.");
+      }
     }
   };
 
+  const showVisionDetails = async (visionId: number) => {
+    setVisionDetailsModal({ show: true, details: null, loading: true });
+    try {
+      const res = await fetch(
+        `${api_startpoint}/api/vision_details/${visionId}`
+      );
+      if (!res.ok) throw new Error("Failed to fetch vision details");
+      const details: VisionDetails = await res.json();
+      setVisionDetailsModal({ show: true, details, loading: false });
+    } catch (error) {
+      console.error("Error fetching vision details:", error);
+      alert("Failed to load vision details.");
+      setVisionDetailsModal({ show: false, details: null, loading: false });
+    }
+  };
+
+  const showMcqAnswers = async (
+    visionId: number,
+    userId: number,
+    visionTitle: string,
+    userName: string
+  ) => {
+    setMcqAnswersModal({
+      show: true,
+      answers: [],
+      loading: true,
+      visionTitle,
+      userName,
+    });
+    try {
+      const res = await fetch(
+        `${api_startpoint}/api/mcq_answers/${visionId}/${userId}`
+      );
+      if (!res.ok) throw new Error("Failed to fetch MCQ answers");
+      const data = await res.json();
+      setMcqAnswersModal({
+        show: true,
+        answers: data.mcq_answers,
+        loading: false,
+        visionTitle,
+        userName,
+      });
+    } catch (error) {
+      console.error("Error fetching MCQ answers:", error);
+      alert("Failed to load MCQ answers.");
+      setMcqAnswersModal({
+        show: false,
+        answers: [],
+        loading: false,
+        visionTitle: "",
+        userName: "",
+      });
+    }
+  };
+
+  const closeVisionDetailsModal = () => {
+    setVisionDetailsModal({ show: false, details: null, loading: false });
+  };
+
+  const closeMcqAnswersModal = () => {
+    setMcqAnswersModal({
+      show: false,
+      answers: [],
+      loading: false,
+      visionTitle: "",
+      userName: "",
+    });
+  };
+
   const exportToCSV = () => {
-    // Return early if there's no data to export
     if (rows.length === 0) {
       alert("No data to export. Please perform a search first.");
       return;
     }
-
     try {
-      // Get all the headers (keys) from the first data row
       const headers = Object.keys(rows[0]);
-
-      // Create CSV header row
       let csvContent = headers.join(",") + "\n";
-
-      // Add data rows
       rows.forEach((row) => {
         const values = headers.map((header) => {
           const cellValue =
             row[header] === null || row[header] === undefined
               ? ""
               : row[header];
-
-          // Handle values that contain commas, quotes, or newlines
           const escapedValue = String(cellValue).replace(/"/g, '""');
-
-          // Wrap in quotes to handle special characters
           return `"${escapedValue}"`;
         });
-
         csvContent += values.join(",") + "\n";
       });
-
-      // Create a blob and download link
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
-
-      // Create a temporary link element and trigger the download
       const link = document.createElement("a");
       link.setAttribute("href", url);
       link.setAttribute(
@@ -161,7 +272,6 @@ export default function VisionSessionsPage() {
           .slice(0, 10)}.csv`
       );
       link.style.visibility = "hidden";
-
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -170,12 +280,14 @@ export default function VisionSessionsPage() {
       alert("An error occurred while exporting data. Please try again.");
     }
   };
+
   return (
     <div className={`page bg-body ${inter.className} font-sans`}>
       <Sidebar />
       <div className="page-wrapper" style={{ marginLeft: "250px" }}>
         <div className="page-body">
           <div className="container-xl pt-4 pb-4 space-y-2">
+            {/* Filters */}
             <div className="card shadow-sm border-0 mb-2">
               <div className="card-body">
                 <div className="row g-3">
@@ -183,7 +295,7 @@ export default function VisionSessionsPage() {
                     <select
                       value={qtype}
                       onChange={(e) => setQtype(e.target.value)}
-                      className="border p-2 rounded"
+                      className="border p-2 rounded w-100"
                     >
                       <option value="">All Types</option>
                       <option value="option">MCQ</option>
@@ -195,7 +307,7 @@ export default function VisionSessionsPage() {
                     <select
                       value={assignedBy}
                       onChange={(e) => setAssignedBy(e.target.value)}
-                      className="border p-2 rounded"
+                      className="border p-2 rounded w-100"
                     >
                       <option value="">All</option>
                       <option value="teacher">Assigned by Teacher</option>
@@ -206,7 +318,7 @@ export default function VisionSessionsPage() {
                     <select
                       value={filterStatus}
                       onChange={(e) => setFilterStatus(e.target.value)}
-                      className="border p-2 rounded"
+                      className="border p-2 rounded w-100"
                     >
                       <option value="">All Status</option>
                       <option value="requested">Requested</option>
@@ -219,7 +331,7 @@ export default function VisionSessionsPage() {
                       type="date"
                       value={dateStart}
                       onChange={(e) => setDateStart(e.target.value)}
-                      className="border p-2 rounded"
+                      className="border p-2 rounded w-100"
                     />
                   </div>
                   <div className="col-12 col-md-6 col-lg-3">
@@ -227,7 +339,7 @@ export default function VisionSessionsPage() {
                       type="date"
                       value={dateEnd}
                       onChange={(e) => setDateEnd(e.target.value)}
-                      className="border p-2 rounded"
+                      className="border p-2 rounded w-100"
                     />
                   </div>
                   <div className="col-12 col-md-6 col-lg-4">
@@ -272,7 +384,6 @@ export default function VisionSessionsPage() {
                     </div>
                   </div>
                 </div>
-                {/* Action Buttons */}
                 <div className="d-flex flex-wrap gap-2 mt-4">
                   <button
                     className="btn btn-success d-inline-flex align-items-center"
@@ -281,7 +392,6 @@ export default function VisionSessionsPage() {
                     <Search className="me-2" size={16} />
                     Search
                   </button>
-
                   <button
                     className="btn btn-warning d-inline-flex align-items-center text-dark"
                     onClick={handleClear}
@@ -292,7 +402,8 @@ export default function VisionSessionsPage() {
                 </div>
               </div>
             </div>
-            {/* Action Buttons */}
+
+            {/* Export Button */}
             <div className="d-flex flex-wrap gap-2">
               <button
                 className="btn btn-purple d-inline-flex align-items-center text-white"
@@ -303,146 +414,249 @@ export default function VisionSessionsPage() {
                 Export
               </button>
             </div>
-            {/* Table */}
+
+            {/* Sessions Table - Improved Styling */}
             {loading ? (
-              <div className="w-8 h-8 border-t-2 border-sky-700 animate-spin rounded-full"></div>
+              <div className="w-8 h-8 border-t-2 border-sky-700 animate-spin rounded-full mx-auto my-4"></div>
             ) : (
-              <table className="w-full table-auto border">
-                <thead>
-                  <tr className="bg-gray-100">
-                    <th className="p-2 border">Vision</th>
-                    <th className="p-2 border">Question</th>
-                    <th className="p-2 border">User</th>
-                    <th className="p-2 border">Assigned By</th>
-                    <th className="p-2 border">Answer Text</th>
-                    <th className="p-2 border">Answer Option</th>
-                    <th className="p-2 border">Image Answer</th>
-                    <th className="p-2 border">Total Points</th>
-                    <th className="p-2 border">Status</th>
-                    {filterStatus === "requested" && (
-                      <th className="p-2 border">Actions</th>
-                    )}
-                    <th className="p-2 border">Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.answer_id}>
-                      <td className="p-2 border">{r.vision_title}</td>
-                      <td className="p-2 border">{r.question_title}</td>
-                      <td className="p-2 border">{r.user_name}</td>
-                      <td className="p-2 border">{r.teacher_name}</td>
-                      <td className="p-2 border">
-                        {r.answer_type === "text" ? r.answer_text : ""}
-                      </td>
-                      <td className="p-2 border">
-                        {r.answer_type === "option" ? r.answer_option : ""}
-                      </td>
-                      <td className="p-2 border">
-                        {r.answer_type === "image" && r.media_url && (
-                          <img
-                            src={r.media_url}
-                            alt="Answer"
-                            className="h-12 w-12 object-cover cursor-pointer"
-                            onClick={() => setLightboxUrl(r.media_url!)}
-                          />
-                        )}
-                      </td>
-                      <td className="p-2 border">
-                        <input
-                          type="number"
-                          defaultValue={r.score ?? ""}
-                          onBlur={(e) =>
-                            handleScoreBlur(r.answer_id, e.target.value)
-                          }
-                          className="w-16 border p-1 rounded"
-                        />
-                      </td>
-                      <td className="p-2 border">{r.status}</td>
-
+              <div className="table-responsive">
+                {/* Added table-bordered for vertical/horizontal lines, table-sm for slightly smaller padding, border for outline */}
+                <table className="table table-vcenter card-table table-striped table-bordered table-sm border">
+                  <thead className="table-light">
+                    <tr>
+                      <th className="text-nowrap">Vision</th>
+                      {/* Increased width for Question column */}
+                      <th
+                        className="text-nowrap"
+                        style={{ minWidth: "400px", width: "40%" }}
+                      >
+                        Question
+                      </th>
+                      <th className="text-nowrap">User</th>
+                      <th className="text-nowrap">Assigned By</th>
+                      <th className="text-nowrap">Answer Text</th>
+                      <th className="text-nowrap">Answer Option</th>
+                      <th className="text-nowrap">Image Answer</th>
+                      <th className="text-nowrap">YouTube Link</th>
+                      <th className="text-nowrap">Show Details</th>
+                      <th className="text-nowrap">Total Points</th>
+                      <th className="text-nowrap">Status</th>
                       {filterStatus === "requested" && (
-                        <td className="p-2 border space-x-2">
+                        <th className="text-nowrap">Actions</th>
+                      )}
+                      <th className="text-nowrap">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr
+                        key={`${r.answer_id || r.representative_answer_id}-${
+                          r.user_id || 0
+                        }`}
+                      >
+                        <td className="align-middle">{r.vision_title}</td>
+                        {/* Question column with wider space */}
+                        <td
+                          className="align-middle"
+                          style={{ minWidth: "300px", width: "30%" }}
+                        >
+                          {r.question_title}
+                        </td>
+                        <td className="align-middle">{r.user_name}</td>
+                        <td className="align-middle">{r.teacher_name}</td>
+                        <td className="align-middle">
+                          {r.answer_type === "text" ? r.answer_text : ""}
+                        </td>
+                        <td className="align-middle">
+                          {r.answer_type === "mcq" ? (
+                            <button
+                              className="btn btn-sm btn-outline-primary"
+                              onClick={() =>
+                                showMcqAnswers(
+                                  r.vision_id,
+                                  r.user_id!,
+                                  r.vision_title,
+                                  r.user_name
+                                )
+                              }
+                            >
+                              See MCQ Answers
+                            </button>
+                          ) : (
+                            r.answer_option
+                          )}
+                        </td>
+                        <td className="align-middle">
+                          {r.answer_type === "image" && r.media_url && (
+                            <img
+                              src={r.media_url}
+                              alt="Answer"
+                              className="img-thumbnail cursor-pointer"
+                              style={{ maxHeight: "50px", maxWidth: "50px" }}
+                              onClick={() => setLightboxUrl(r.media_url!)}
+                            />
+                          )}
+                        </td>
+                        <td className="align-middle">
+                          {r.vision_youtube_url ? (
+                            <a
+                              href={r.vision_youtube_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary"
+                            >
+                              Vide Link
+                            </a>
+                          ) : (
+                            "N/A"
+                          )}
+                        </td>
+                        <td className="align-middle text-center">
+                          {" "}
+                          {/* Centered button */}
                           <button
-                            className="btn btn-sm btn-success"
-                            onClick={async () => {
-                              // First: update status to 'approved'
-                              await fetch(
-                                `${api_startpoint}/api/vision_sessions/${r.answer_id}/status`,
-                                {
-                                  method: "PUT",
-                                  headers: {
-                                    "Content-Type": "application/json",
-                                  },
-                                  body: JSON.stringify({ status: "approved" }),
-                                }
-                              );
-
-                              // Second: call score API to store points
-                              await fetch(
-                                `${api_startpoint}/api/vision_sessions/${r.answer_id}/score`,
-                                {
-                                  method: "PUT",
-                                  headers: {
-                                    "Content-Type": "application/json",
-                                  },
-                                  body: JSON.stringify({
-                                    points: r.points || 10,
-                                  }),
-                                }
-                              );
-
-                              // Refresh sessions
-                              fetchSessions();
-
-                              // NEW: Show confirmation modal
-                              setConfirmationModal({
-                                show: true,
-                                type: "approve",
-                                message:
-                                  "Vision session approved successfully!",
-                              });
-                            }}
+                            className="btn btn-sm btn-icon btn-outline-secondary"
+                            onClick={() => showVisionDetails(r.vision_id)}
+                            title="Show Vision Details"
                           >
-                            Approved
-                          </button>
-
-                          <button
-                            className="btn btn-sm btn-danger"
-                            onClick={async () => {
-                              await fetch(
-                                `${api_startpoint}/api/vision_sessions/${r.answer_id}/status`,
-                                {
-                                  method: "PUT",
-                                  headers: {
-                                    "Content-Type": "application/json",
-                                  },
-                                  body: JSON.stringify({ status: "rejected" }),
-                                }
-                              );
-                              fetchSessions();
-
-                              // NEW: Show confirmation modal
-                              setConfirmationModal({
-                                show: true,
-                                type: "reject",
-                                message:
-                                  "Vision session rejected successfully!",
-                              });
-                            }}
-                          >
-                            Reject
+                            <Eye size={16} />
                           </button>
                         </td>
-                      )}
-
-                      <td className="p-2 border">
-                        {new Date(r.created_at).toLocaleDateString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        <td className="align-middle">
+                          <input
+                            type="number"
+                            defaultValue={r.score ?? ""}
+                            onBlur={(e) =>
+                              handleScoreBlur(
+                                r.answer_id || r.representative_answer_id!,
+                                e.target.value
+                              )
+                            }
+                            className="form-control form-control-sm w-100"
+                            style={{ maxWidth: "80px" }}
+                            disabled={r.answer_type === "mcq"}
+                          />
+                        </td>
+                        <td className="align-middle">
+                          <span
+                            className={`badge ${
+                              r.status === "approved"
+                                ? "bg-success"
+                                : r.status === "rejected"
+                                ? "bg-danger"
+                                : r.status === "requested"
+                                ? "bg-warning"
+                                : "bg-secondary"
+                            }`}
+                          >
+                            {r.status}
+                          </span>
+                        </td>
+                        {filterStatus === "requested" && (
+                          <td className="align-middle">
+                            <div
+                              className="btn-group btn-group-sm"
+                              role="group"
+                            >
+                              <button
+                                className="btn btn-success"
+                                onClick={async () => {
+                                  const targetId =
+                                    r.answer_id || r.representative_answer_id;
+                                  if (!targetId) return;
+                                  try {
+                                    await fetch(
+                                      `${api_startpoint}/api/vision_sessions/${targetId}/status`,
+                                      {
+                                        method: "PUT",
+                                        headers: {
+                                          "Content-Type": "application/json",
+                                        },
+                                        body: JSON.stringify({
+                                          status: "approved",
+                                        }),
+                                      }
+                                    );
+                                    await fetch(
+                                      `${api_startpoint}/api/vision_sessions/${targetId}/score`,
+                                      {
+                                        method: "PUT",
+                                        headers: {
+                                          "Content-Type": "application/json",
+                                        },
+                                        body: JSON.stringify({ points: 10 }),
+                                      }
+                                    );
+                                    fetchSessions();
+                                    setConfirmationModal({
+                                      show: true,
+                                      type: "approve",
+                                      message:
+                                        "Vision session approved successfully!",
+                                    });
+                                  } catch (error) {
+                                    console.error(
+                                      "Error approving session:",
+                                      error
+                                    );
+                                    alert("Failed to approve session.");
+                                  }
+                                }}
+                                disabled={r.answer_type === "mcq"}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                className="btn btn-danger"
+                                onClick={async () => {
+                                  const targetId =
+                                    r.answer_id || r.representative_answer_id;
+                                  if (!targetId) return;
+                                  try {
+                                    await fetch(
+                                      `${api_startpoint}/api/vision_sessions/${targetId}/status`,
+                                      {
+                                        method: "PUT",
+                                        headers: {
+                                          "Content-Type": "application/json",
+                                        },
+                                        body: JSON.stringify({
+                                          status: "rejected",
+                                        }),
+                                      }
+                                    );
+                                    fetchSessions();
+                                    setConfirmationModal({
+                                      show: true,
+                                      type: "reject",
+                                      message:
+                                        "Vision session rejected successfully!",
+                                    });
+                                  } catch (error) {
+                                    console.error(
+                                      "Error rejecting session:",
+                                      error
+                                    );
+                                    alert("Failed to reject session.");
+                                  }
+                                }}
+                                disabled={r.answer_type === "mcq"}
+                              >
+                                Reject
+                              </button>
+                            </div>
+                          </td>
+                        )}
+                        <td className="align-middle text-nowrap">
+                          {new Date(r.created_at).toLocaleDateString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
+
             {/* Pagination Controls */}
             <div className="d-flex justify-content-between align-items-center p-3">
               <button
@@ -452,9 +666,7 @@ export default function VisionSessionsPage() {
               >
                 Previous
               </button>
-
               <span>Page {page}</span>
-
               <button
                 className="btn btn-primary"
                 onClick={() => setPage((prev) => prev + 1)}
@@ -463,70 +675,428 @@ export default function VisionSessionsPage() {
                 Next
               </button>
             </div>
+
             {/* Lightbox Modal */}
             {lightboxUrl && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <img
-                  src={lightboxUrl}
-                  className="max-h-[90vh] object-contain"
-                />
-                <button
-                  className="absolute top-4 right-4 text-white text-2xl"
-                  onClick={() => setLightboxUrl(null)}
+              <div
+                className="modal modal-blur fade show"
+                style={{ display: "block" }}
+                id="image-lightbox"
+                tabIndex={-1}
+                role="dialog"
+              >
+                <div
+                  className="modal-dialog modal-dialog-centered"
+                  role="document"
                 >
-                  ×
-                </button>
+                  <div className="modal-content">
+                    <div className="modal-header">
+                      <h5 className="modal-title">Image Answer</h5>
+                      <button
+                        type="button"
+                        className="btn-close"
+                        onClick={() => setLightboxUrl(null)}
+                        aria-label="Close"
+                      ></button>
+                    </div>
+                    <div className="modal-body text-center">
+                      <img
+                        src={lightboxUrl}
+                        className="img-fluid"
+                        alt="Answer"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
-            {/* NEW: Confirmation Modal */}
+            {/* Confirmation Modal */}
             {confirmationModal.show && (
               <div
-                className="position-fixed start-0 end-0 top-0 bottom-0 d-flex align-items-center justify-content-center"
-                style={{ zIndex: 1060 }}
+                className="modal modal-blur fade show"
+                style={{ display: "block" }}
+                id="confirmation-modal"
+                tabIndex={-1}
+                role="dialog"
               >
                 <div
-                  className="bg-white rounded-lg shadow-lg p-5 border border-gray-300"
-                  style={{ width: "300px", zIndex: 1070 }}
+                  className="modal-dialog modal-sm modal-dialog-centered"
+                  role="document"
                 >
-                  <div className="text-center">
-                    <div className="mb-3">
-                      {confirmationModal.type === "approve" ? (
-                        <IconCircleCheck
-                          className="text-green"
-                          size={48}
-                          strokeWidth={1.5}
-                        />
-                      ) : (
-                        <IconCircleX
-                          className="text-danger"
-                          size={48}
-                          strokeWidth={1.5}
-                        />
-                      )}
-                    </div>
-                    <h4 className="mb-3">
-                      {confirmationModal.type === "approve"
-                        ? "Vision Approved"
-                        : "Vision Rejected"}
-                    </h4>
-                    <p className="text-muted mb-4">
-                      {confirmationModal.message}
-                    </p>
+                  <div className="modal-content">
                     <button
-                      className="btn btn-danger w-100" // Red button
+                      type="button"
+                      className="btn-close"
                       onClick={() =>
                         setConfirmationModal({
                           ...confirmationModal,
                           show: false,
                         })
                       }
-                    >
-                      OK
-                    </button>
+                      style={{
+                        position: "absolute",
+                        right: "15px",
+                        top: "15px",
+                      }}
+                    ></button>
+                    <div className="modal-body text-center py-4">
+                      <div className="mb-3">
+                        {confirmationModal.type === "approve" ? (
+                          <IconCircleCheck
+                            className="text-success"
+                            size={48}
+                            strokeWidth={1.5}
+                          />
+                        ) : (
+                          <IconCircleX
+                            className="text-danger"
+                            size={48}
+                            strokeWidth={1.5}
+                          />
+                        )}
+                      </div>
+                      <h3>
+                        {confirmationModal.type === "approve"
+                          ? "Approved"
+                          : "Rejected"}
+                      </h3>
+                      <div className="text-muted">
+                        {confirmationModal.message}
+                      </div>
+                    </div>
+                    <div className="modal-footer">
+                      <div className="w-100">
+                        <div className="row">
+                          <div className="col">
+                            <button
+                              className="btn w-100 btn-primary"
+                              onClick={() =>
+                                setConfirmationModal({
+                                  ...confirmationModal,
+                                  show: false,
+                                })
+                              }
+                            >
+                              OK
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
+            )}
+
+            {/* Vision Details Modal - Larger Headers */}
+            {visionDetailsModal.show && (
+              <div
+                className="modal modal-blur fade show"
+                style={{ display: "block" }}
+                id="vision-details-modal"
+                tabIndex={-1}
+                role="dialog"
+              >
+                <div
+                  className="modal-dialog modal-xl modal-dialog-centered"
+                  role="document"
+                >
+                  <div className="modal-content">
+                    <div className="modal-header">
+                      {/* Increased title size */}
+                      <h3 className="modal-title fw-bold">Vision Details</h3>
+                      <button
+                        type="button"
+                        className="btn-close"
+                        onClick={closeVisionDetailsModal}
+                        aria-label="Close"
+                      ></button>
+                    </div>
+                    <div className="modal-body">
+                      {visionDetailsModal.loading ? (
+                        <div className="text-center">
+                          <div
+                            className="spinner-border text-primary"
+                            role="status"
+                          >
+                            <span className="visually-hidden">Loading...</span>
+                          </div>
+                        </div>
+                      ) : visionDetailsModal.details ? (
+                        <div>
+                          {/* Section: Title - Larger Header */}
+                          <div className="mb-4">
+                            {/* Increased header size using h4 and fs-5 for text */}
+                            <h4 className="fw-bold mb-2 text-primary fs-3">
+                              Title
+                            </h4>
+                            <p className="mb-0 fs-4">
+                              {visionDetailsModal.details.title}
+                            </p>
+                          </div>
+                          <hr />
+
+                          {/* Section: Description - Larger Header */}
+                          <div className="mb-4">
+                            <h4 className="fw-bold mb-2 text-primary fs-3">
+                              Description
+                            </h4>
+                            <p className="mb-0 fs-4">
+                              {visionDetailsModal.details.description}
+                            </p>
+                          </div>
+                          <hr />
+
+                          {/* Section: YouTube Link - Larger Header */}
+                          <div className="mb-4">
+                            <h4 className="fw-bold mb-2 text-primary fs-3">
+                              YouTube Link
+                            </h4>
+                            {visionDetailsModal.details.youtube_url ? (
+                              <a
+                                href={visionDetailsModal.details.youtube_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-primary fs-4"
+                              >
+                                {visionDetailsModal.details.youtube_url}
+                              </a>
+                            ) : (
+                              <p className="mb-0 text-muted fs-5">N/A</p>
+                            )}
+                          </div>
+                          <hr />
+
+                          {/* Section: Subject - Larger Header */}
+                          <div className="mb-4">
+                            <h4 className="fw-bold mb-2 text-primary fs-3">
+                              Subject
+                            </h4>
+                            <p className="mb-0 fs-4">
+                              {visionDetailsModal.details.subject || "N/A"}
+                            </p>
+                          </div>
+                          <hr />
+
+                          {/* Section: Level - Larger Header */}
+                          <div className="mb-4">
+                            <h4 className="fw-bold mb-2 text-primary fs-3">
+                              Level
+                            </h4>
+                            <p className="mb-0 fs-4">
+                              {visionDetailsModal.details.level || "N/A"}
+                            </p>
+                          </div>
+                          <hr />
+
+                          {/* Section: Questions - No Accordion */}
+                          <div>
+                            {/* Larger Header for Questions section */}
+                            <h4 className="fw-bold mb-3 text-primary fs-3">
+                              Questions
+                            </h4>
+                            {visionDetailsModal.details.questions.length > 0 ? (
+                              <div className="row g-3">
+                                {visionDetailsModal.details.questions.map(
+                                  (q) => (
+                                    <div className="col-12" key={q.question_id}>
+                                      <div className="card border">
+                                        <div className="card-body">
+                                          <h6 className="card-subtitle mb-2 text-muted fs-4">
+                                            <span className="badge bg-secondary me-2">
+                                              {q.question_type.toUpperCase()}
+                                            </span>
+                                            {q.question}
+                                          </h6>
+
+                                          {q.options && (
+                                            <div className="mt-2">
+                                              <p className="mb-1 fw-medium fs-4">
+                                                Options:
+                                              </p>
+                                              <ul className="mb-0 ps-3">
+                                                {Object.entries(q.options).map(
+                                                  ([key, value]) => (
+                                                    <li
+                                                      key={key}
+                                                      className="mb-1 fs-4"
+                                                    >
+                                                      <strong>
+                                                        {key.toUpperCase()}:
+                                                      </strong>{" "}
+                                                      {value}
+                                                    </li>
+                                                  )
+                                                )}
+                                              </ul>
+                                            </div>
+                                          )}
+
+                                          {q.correct_answer && (
+                                            <div className="mt-2">
+                                              <p className="mb-0 fw-bold text-success fs-4">
+                                                Correct Answer:{" "}
+                                                {q.correct_answer.toUpperCase()}
+                                              </p>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )
+                                )}
+                              </div>
+                            ) : (
+                              <p className="text-muted fs-4">
+                                No questions found for this vision.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-danger fs-4">
+                          Error loading details.
+                        </p>
+                      )}
+                    </div>
+                    <div className="modal-footer">
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={closeVisionDetailsModal}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* MCQ Answers Modal - Removed Status Column */}
+            {mcqAnswersModal.show && (
+              <div
+                className="modal modal-blur fade show"
+                style={{ display: "block" }}
+                id="mcq-answers-modal"
+                tabIndex={-1}
+                role="dialog"
+              >
+                <div
+                  className="modal-dialog modal-xl modal-dialog-centered"
+                  role="document"
+                >
+                  <div className="modal-content">
+                    <div className="modal-header">
+                      <h5 className="modal-title">
+                        MCQ Answers: {mcqAnswersModal.visionTitle} -{" "}
+                        {mcqAnswersModal.userName}
+                      </h5>
+                      <button
+                        type="button"
+                        className="btn-close"
+                        onClick={closeMcqAnswersModal}
+                        aria-label="Close"
+                      ></button>
+                    </div>
+                    <div className="modal-body">
+                      {mcqAnswersModal.loading ? (
+                        <div className="text-center">
+                          <div
+                            className="spinner-border text-primary"
+                            role="status"
+                          >
+                            <span className="visually-hidden">Loading...</span>
+                          </div>
+                        </div>
+                      ) : mcqAnswersModal.answers.length > 0 ? (
+                        <div className="table-responsive">
+                          <table className="table table-bordered table-hover align-middle">
+                            <thead className="table-dark">
+                              <tr>
+                                <th scope="col">#</th>
+                                <th scope="col">Question</th>
+                                <th scope="col">Options</th>
+                                <th scope="col">Correct Answer</th>
+                                <th scope="col">Student's Answer</th>
+                                {/* Status column removed */}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {mcqAnswersModal.answers.map((answer, index) => (
+                                <tr key={answer.answer_id}>
+                                  <th scope="row">{index + 1}</th>
+                                  <td>{answer.question_text}</td>
+                                  <td>
+                                    {answer.options ? (
+                                      <ul className="mb-0 ps-3">
+                                        {Object.entries(answer.options).map(
+                                          ([key, value]) => (
+                                            <li key={key}>
+                                              <strong>
+                                                {key.toUpperCase()}:
+                                              </strong>{" "}
+                                              {value}
+                                            </li>
+                                          )
+                                        )}
+                                      </ul>
+                                    ) : (
+                                      "N/A"
+                                    )}
+                                  </td>
+                                  <td className="fw-bold text-success">
+                                    {answer.correct_answer?.toUpperCase() ||
+                                      "N/A"}
+                                  </td>
+                                  <td
+                                    className={`fw-bold ${
+                                      answer.answer_option?.toLowerCase() ===
+                                      answer.correct_answer?.toLowerCase()
+                                        ? "text-success"
+                                        : "text-danger"
+                                    }`}
+                                  >
+                                    {answer.answer_option?.toUpperCase() ||
+                                      "N/A"}
+                                    {answer.answer_option?.toLowerCase() ===
+                                    answer.correct_answer?.toLowerCase()
+                                      ? " (Correct)"
+                                      : " (Incorrect)"}
+                                  </td>
+                                  {/* Status cell removed */}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <p className="text-muted text-center fs-5">
+                          No MCQ answers found for this session.
+                        </p>
+                      )}
+                    </div>
+                    <div className="modal-footer">
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={closeMcqAnswersModal}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Backdrop for modals */}
+            {(lightboxUrl ||
+              confirmationModal.show ||
+              visionDetailsModal.show ||
+              mcqAnswersModal.show) && (
+              <div className="modal-backdrop fade show"></div>
             )}
           </div>
         </div>
