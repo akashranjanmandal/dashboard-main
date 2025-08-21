@@ -15,6 +15,7 @@ from typing import Optional, Dict, Any, List, Union
 import logging
 from werkzeug.utils import secure_filename
 from flask import session
+import json
   # Added import
 
 # Configure logging
@@ -177,6 +178,71 @@ def upload_media(file):
 ######################## HOME DASHBOARD APIs ######################################
 ###################################################################################
 ###################################################################################
+
+def build_filter_conditions(request_args=None):
+    """Build SQL WHERE conditions and parameters based on global filters"""
+    if request_args is None:
+        request_args = request.args
+    
+    conditions = []
+    params = []
+    
+    # State filter
+    state = request_args.get('state')
+    if state and state != 'All':
+        conditions.append("s.state = %s")
+        params.append(state)
+    
+    # City filter  
+    city = request_args.get('city')
+    if city and city != 'All':
+        conditions.append("s.city = %s")
+        params.append(city)
+    
+    # School code filter
+    school_code = request_args.get('school_code')
+    if school_code and school_code.strip() != '':
+        conditions.append("s.school_code = %s")
+        params.append(school_code.strip())
+    
+    # User type filter
+    user_type = request_args.get('userType')
+    if user_type and user_type != 'All':
+        if user_type == 'Student':
+            conditions.append("u.type = 3")
+        elif user_type == 'Teacher':
+            conditions.append("u.type = 2")
+        elif user_type == 'Mentor':
+            conditions.append("u.type = 4")
+    
+    # Grade filter
+    grade = request_args.get('grade')
+    if grade and grade != 'All':
+        conditions.append("u.grade = %s")
+        params.append(grade)
+    
+    # Gender filter
+    gender = request_args.get('gender')
+    if gender and gender != 'All':
+        conditions.append("u.gender = %s")
+        params.append(gender)
+    
+    # Date range filter
+    date_range = request_args.get('dateRange')
+    if date_range and date_range != 'All':
+        if date_range == 'last7days':
+            conditions.append("u.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)")
+        elif date_range == 'last30days':
+            conditions.append("u.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)")
+        elif date_range == 'last3months':
+            conditions.append("u.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)")
+        elif date_range == 'last6months':
+            conditions.append("u.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)")
+        elif date_range == 'lastyear':
+            conditions.append("u.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)")
+    
+    where_clause = " AND ".join(conditions) if conditions else "1=1"
+    return where_clause, params
 
 def execute_query(query: str, params: tuple = None) -> List[Dict[str, Any]]:
     """
@@ -3445,8 +3511,6 @@ def update_mission_status():
 ###################################################################################
 ###################################################################################
 
-# 5. Fetch Vision Session Answers with Pagination & Filters
- # Add this import at the top
 
 
 def notify_vision_status(vision_id, user_id, status):
@@ -3463,23 +3527,26 @@ def notify_vision_status(vision_id, user_id, status):
         print(f"Notification error: {e}")
         return False
 
+
 @app.route('/api/vision_sessions', methods=['GET'])
 def fetch_vision_sessions():
-    qs          = request.args
-    page        = int(qs.get('page', 1))
-    per_page    = int(qs.get('per_page', 25))
-    offset      = (page - 1) * per_page
-    qtype       = qs.get('question_type')
+    qs = request.args
+    page = int(qs.get('page', 1))
+    per_page = int(qs.get('per_page', 25))
+    offset = (page - 1) * per_page
+    qtype = qs.get('question_type')
     assigned_by = qs.get('assigned_by')
-    date_start  = qs.get('date_start')
-    date_end    = qs.get('date_end')
+    date_start = qs.get('date_start')
+    date_end = qs.get('date_end')
     school_codes = qs.getlist('school_codes')
-    status_filt = qs.get('status')   # 'requested'|'approved'|'rejected'
+    status_filt = qs.get('status')  # 'requested'|'approved'|'rejected'
 
-    base_sql = '''
+    # --- Base SQL for NON-MCQ answers (Text, Image) ---
+    base_sql_non_mcq = '''
     SELECT
       a.id           AS answer_id,
-      v.title        AS vision_title,
+      v.id           AS vision_id,
+      JSON_UNQUOTE(JSON_EXTRACT(v.title, '$.en')) AS vision_title,
       JSON_UNQUOTE(JSON_EXTRACT(q.question, '$.en')) AS question_title,
       u.name         AS user_name,
       COALESCE(t.name,'self') AS teacher_name,
@@ -3488,11 +3555,14 @@ def fetch_vision_sessions():
       m.id           AS media_id,
       m.path         AS media_path,
       a.score,
-      a.answer_type,
-      a.status,             
-      a.approved_at,        
-      a.rejected_at,        
-      a.created_at
+      a.answer_type, -- 'text' or 'image'
+      a.status,
+      a.approved_at,
+      a.rejected_at,
+      a.created_at,
+      v.youtube_url  AS vision_youtube_url,
+      NULL           AS user_id, -- Placeholder for MCQ grouping logic
+      NULL           AS representative_answer_id -- Placeholder for MCQ grouping logic
     FROM vision_question_answers a
     JOIN visions v          ON v.id = a.vision_id
     JOIN vision_questions q ON q.id = a.question_id
@@ -3503,50 +3573,307 @@ def fetch_vision_sessions():
     LEFT JOIN users t       ON t.id = vs.teacher_id
     LEFT JOIN media m       ON m.id = a.media_id
     LEFT JOIN lifeapp.schools s ON s.id = u.school_id
-    WHERE 1=1
+    WHERE a.answer_type IN ('text', 'image') -- Filter for non-MCQ types only
     '''
-    params = []
 
-    if qtype:
-        base_sql += ' AND a.answer_type = %s';    params.append(qtype)
-    if assigned_by=='teacher':
-        base_sql += ' AND vs.teacher_id IS NOT NULL'
-    elif assigned_by=='self':
-        base_sql += ' AND vs.teacher_id IS NULL'
+    # --- Base SQL for MCQ answers (for grouping) ---
+    base_sql_mcq = '''
+    SELECT
+      NULL           AS answer_id, -- Placeholder for non-MCQ logic
+      a.vision_id    AS vision_id,
+      JSON_UNQUOTE(JSON_EXTRACT(v.title, '$.en')) AS vision_title,
+      'MCQ Group'    AS question_title, -- Placeholder
+      u.name         AS user_name,
+      COALESCE(t.name,'self') AS teacher_name,
+      NULL           AS answer_text, -- MCQs don't use text directly in main table
+      'See MCQ Answers' AS answer_option, -- Placeholder text or indicator
+      NULL           AS media_id, -- MCQs don't use media directly in main table
+      NULL           AS media_path, -- MCQs don't use media directly in main table
+      MAX(a.score)   AS score, -- Assuming score is consistent per MCQ group or take max
+      'mcq'          AS answer_type, -- Explicitly mark as MCQ group type
+      MAX(a.status)  AS status, -- Assuming status is consistent or take max
+      MAX(a.approved_at) AS approved_at, -- Use max for display
+      MAX(a.rejected_at) AS rejected_at, -- Use max for display
+      MAX(a.created_at)  AS created_at, -- Use max for display and ordering
+      v.youtube_url  AS vision_youtube_url,
+      a.user_id      AS user_id, -- Needed for MCQ modal lookup
+      MAX(a.id)      AS representative_answer_id -- Use max ID for actions (status/score)
+    FROM vision_question_answers a
+    JOIN visions v ON v.id = a.vision_id
+    JOIN users u ON u.id = a.user_id
+    LEFT JOIN vision_assigns vs 
+      ON vs.vision_id = a.vision_id 
+     AND vs.student_id = a.user_id
+    LEFT JOIN users t ON t.id = vs.teacher_id
+    LEFT JOIN lifeapp.schools s ON s.id = u.school_id
+    WHERE a.answer_type = 'option' -- Filter for MCQ type only
+    GROUP BY a.vision_id, a.user_id, v.title, u.name, t.name, v.youtube_url -- Group by session
+    '''
+
+    # --- Combine Queries using UNION ALL ---
+    combined_sql_parts = []
+    combined_params = []
+
+    # --- Build Non-MCQ Query ---
+    non_mcq_sql = base_sql_non_mcq
+    non_mcq_params = []
+    # Apply filters common to non-MCQ
+    if assigned_by == 'teacher':
+        non_mcq_sql += ' AND vs.teacher_id IS NOT NULL'
+    elif assigned_by == 'self':
+        non_mcq_sql += ' AND vs.teacher_id IS NULL'
     if date_start:
-        base_sql += ' AND DATE(a.created_at) >= %s'; params.append(date_start)
+        non_mcq_sql += ' AND DATE(a.created_at) >= %s'
+        non_mcq_params.append(date_start)
     if date_end:
-        base_sql += ' AND DATE(a.created_at) <= %s'; params.append(date_end)
+        non_mcq_sql += ' AND DATE(a.created_at) <= %s'
+        non_mcq_params.append(date_end)
     if school_codes:
-        ph = ','.join(['%s']*len(school_codes))
-        base_sql += f' AND u.school_code IN ({ph})'; params += school_codes
+        placeholders = ','.join(['%s'] * len(school_codes))
+        non_mcq_sql += f' AND u.school_code IN ({placeholders})'
+        non_mcq_params.extend(school_codes)
+    # Apply ordering to non-MCQ part
+    non_mcq_sql += ' ORDER BY created_at DESC'
+    # Add non-MCQ part to combined query if needed
+    if qtype != 'option': # If qtype is 'option', we don't want non-MCQ rows
+        combined_sql_parts.append(f"({non_mcq_sql})")
+        combined_params.extend(non_mcq_params)
 
-    if status_filt in ('requested','approved','rejected'):
-        base_sql += ' AND a.status = %s'; params.append(status_filt)
+    # --- Build MCQ Query ---
+    mcq_sql = base_sql_mcq
+    mcq_params = []
+    # Apply filters common to MCQ (grouped)
+    if assigned_by == 'teacher':
+        mcq_sql += ' AND vs.teacher_id IS NOT NULL'
+    elif assigned_by == 'self':
+        mcq_sql += ' AND vs.teacher_id IS NULL'
+    if date_start:
+        mcq_sql += ' AND DATE(MAX(a.created_at)) >= %s' # Use MAX for grouped date
+        mcq_params.append(date_start)
+    if date_end:
+        mcq_sql += ' AND DATE(MAX(a.created_at)) <= %s' # Use MAX for grouped date
+        mcq_params.append(date_end)
+    if school_codes:
+        placeholders = ','.join(['%s'] * len(school_codes))
+        mcq_sql += f' AND u.school_code IN ({placeholders})'
+        mcq_params.extend(school_codes)
+    # Apply ordering to MCQ part
+    mcq_sql += ' ORDER BY MAX(a.created_at) DESC' # Use MAX for grouped ordering
+    # Add MCQ part to combined query if needed
+    if qtype != 'text' and qtype != 'image': # If qtype is 'text' or 'image', we don't want MCQ rows
+        combined_sql_parts.append(f"({mcq_sql})")
+        combined_params.extend(mcq_params)
 
-    base_sql += ' ORDER BY a.created_at DESC LIMIT %s OFFSET %s'
-    params += [per_page, offset]
+    # --- Combine and Finalize Query ---
+    if not combined_sql_parts:
+        # Handle case where both parts might be empty due to filters
+        final_sql = "SELECT NULL AS answer_id, NULL AS vision_id, NULL AS vision_title, NULL AS question_title, NULL AS user_name, NULL AS teacher_name, NULL AS answer_text, NULL AS answer_option, NULL AS media_id, NULL AS media_path, NULL AS score, NULL AS answer_type, NULL AS status, NULL AS approved_at, NULL AS rejected_at, NULL AS created_at, NULL AS vision_youtube_url, NULL AS user_id, NULL AS representative_answer_id FROM DUAL WHERE FALSE"
+        final_params = []
+    else:
+        # Combine the parts with UNION ALL
+        inner_combined_sql = " UNION ALL ".join(combined_sql_parts)
+
+        # --- Apply OUTER FILTERS ---
+        # Apply the status filter at the outer level to the combined results
+        outer_filter_conditions = []
+        outer_filter_params = []
+        if status_filt in ('requested', 'approved', 'rejected'):
+             # Important: Filter based on the 'status' column of the combined result set
+             outer_filter_conditions.append(" combined_results.status = %s ")
+             outer_filter_params.append(status_filt)
+
+        # Apply the question type filter at the outer level
+        outer_qtype_conditions = []
+        outer_qtype_params = []
+        if qtype == 'option':
+             # Show only MCQ groups
+             outer_qtype_conditions.append(" combined_results.answer_type = 'mcq' ")
+        elif qtype in ('text', 'image'):
+             # Show only non-MCQ types matching the filter
+             outer_qtype_conditions.append(" combined_results.answer_type = %s ")
+             outer_qtype_params.append(qtype)
+        # If qtype is empty, show all types (no outer filter needed for qtype)
+
+        # Construct the final WHERE clause
+        outer_where_clause = ""
+        all_outer_params = []
+        if outer_filter_conditions or outer_qtype_conditions:
+            outer_conditions = []
+            if outer_filter_conditions:
+                outer_conditions.append(" AND ".join(outer_filter_conditions))
+                all_outer_params.extend(outer_filter_params)
+            if outer_qtype_conditions:
+                outer_conditions.append(" AND ".join(outer_qtype_conditions))
+                all_outer_params.extend(outer_qtype_params)
+            outer_where_clause = " WHERE " + " AND ".join(outer_conditions)
+
+        # Add final ordering and pagination at the outermost level
+        final_sql = f"SELECT * FROM ({inner_combined_sql}) AS combined_results {outer_where_clause} ORDER BY created_at DESC LIMIT %s OFFSET %s"
+        final_params = all_outer_params + [per_page, offset]
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            cursor.execute(base_sql, params)
+            # print("Executing SQL:", final_sql) # Debug print
+            # print("With Params:", final_params) # Debug print
+            cursor.execute(final_sql, final_params)
             rows = cursor.fetchall()
 
-        base_url = os.getenv('BASE_URL','').rstrip('/')
+        base_url = os.getenv('BASE_URL', '').rstrip('/')
         for r in rows:
-            r['media_url'] = f"{base_url}/{r['media_path']}" if r.get('media_path') else None
+            if r.get('media_path'):
+                r['media_url'] = f"{base_url}/{r['media_path']}"
+            else:
+                 r['media_url'] = None
+            if r.get('answer_type') == 'mcq':
+                 r['answer_text'] = None
+                 r['media_url'] = None
 
         return jsonify({
             'page': page,
             'per_page': per_page,
             'data': rows
         }), 200
-
     except Exception as e:
+        print(f"Error fetching vision sessions: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+
+
+# --- NEW API ENDPOINT: Fetch Full Vision Details for Modal ---
+@app.route('/api/vision_details/<int:vision_id>', methods=['GET'])
+def get_vision_details(vision_id):
+    """Fetches complete details of a single vision including questions."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Fetch vision details
+            cursor.execute("""
+                SELECT
+                    v.id AS vision_id,
+                    JSON_UNQUOTE(JSON_EXTRACT(v.title, '$.en')) AS title,
+                    JSON_UNQUOTE(JSON_EXTRACT(v.description, '$.en')) AS description,
+                    v.youtube_url,
+                    v.allow_for,
+                    JSON_UNQUOTE(JSON_EXTRACT(s.title, '$.en')) AS subject,
+                    JSON_UNQUOTE(JSON_EXTRACT(l.title, '$.en')) AS level,
+                    v.status,
+                    v.index
+                FROM lifeapp.visions v
+                LEFT JOIN lifeapp.la_subjects s ON s.id = v.la_subject_id
+                LEFT JOIN lifeapp.la_levels l ON l.id = v.la_level_id
+                WHERE v.id = %s
+            """, (vision_id,))
+            vision_details = cursor.fetchone()
+
+            if not vision_details:
+                return jsonify({'error': 'Vision not found'}), 404
+
+            # Fetch associated questions
+            cursor.execute("""
+                SELECT
+                    q.id AS question_id,
+                    q.question_type,
+                    JSON_UNQUOTE(JSON_EXTRACT(q.question, '$.en')) AS question,
+                    q.options,
+                    q.correct_answer
+                FROM lifeapp.vision_questions q
+                WHERE q.vision_id = %s
+                ORDER BY q.id
+            """, (vision_id,))
+            questions = cursor.fetchall()
+
+            # Process questions (parse options JSON)
+            processed_questions = []
+            for q in questions:
+                options = None
+                if q['options']:
+                    try:
+                        options = json.loads(q['options'])
+                    except json.JSONDecodeError:
+                        pass # Handle potential JSON errors
+                processed_questions.append({
+                    'question_id': q['question_id'],
+                    'question_type': q['question_type'],
+                    'question': q['question'],
+                    'options': options,
+                    'correct_answer': q['correct_answer']
+                })
+
+            vision_details['questions'] = processed_questions
+
+            return jsonify(vision_details), 200
+
+    except Exception as e:
+        print(f"Error fetching vision details: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+# --- NEW API ENDPOINT: Fetch MCQ Answers for a specific user/vision group ---
+@app.route('/api/mcq_answers/<int:vision_id>/<int:user_id>', methods=['GET'])
+def get_mcq_answers(vision_id, user_id):
+    """Fetches specific MCQ answers given by a user for a specific vision."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Fetch MCQ answers joined with question details
+            # This query gets the user's answer AND the question details (including options/correct answer)
+            cursor.execute("""
+                SELECT
+                    a.id AS answer_id,
+                    a.question_id,
+                    a.answer_option,
+                    a.score,
+                    a.status,
+                    a.created_at,
+                    JSON_UNQUOTE(JSON_EXTRACT(q.question, '$.en')) AS question_text,
+                    q.options,
+                    q.correct_answer
+                FROM vision_question_answers a
+                JOIN vision_questions q ON a.question_id = q.id
+                WHERE a.vision_id = %s AND a.user_id = %s AND a.answer_type = 'option'
+                ORDER BY q.id
+            """, (vision_id, user_id))
+            answers = cursor.fetchall()
+
+            # Process answers (parse options JSON)
+            processed_answers = []
+            for a in answers:
+                options = None
+                if a['options']:
+                    try:
+                        options = json.loads(a['options'])
+                    except json.JSONDecodeError:
+                         pass # Handle potential JSON errors
+                processed_answers.append({
+                    'answer_id': a['answer_id'],
+                    'question_id': a['question_id'],
+                    'answer_option': a['answer_option'],
+                    'score': a['score'],
+                    'status': a['status'],
+                    'created_at': a['created_at'].isoformat() if a['created_at'] else None,
+                    'question_text': a['question_text'],
+                    'options': options,
+                    'correct_answer': a['correct_answer']
+                })
+
+            return jsonify({'mcq_answers': processed_answers}), 200
+
+    except Exception as e:
+        print(f"Error fetching MCQ answers: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
 
 
 @app.route('/api/vision_sessions/<int:answer_id>/score', methods=['PUT'])
@@ -4235,18 +4562,41 @@ def get_state_list_teachers():
     finally:
         connection.close()
 
-@app.route('/api/city_list', methods=['GET'])
-def get_city_list():
-    state = request.args.get('state')
-    if not state:
-        return jsonify({"error": "Query param 'state' is required"}), 400
+
+@app.route('/api/city_list_teacher_dashboard', methods=['POST'])
+def get_city_list_teacher_dashboard():
     try:
+        # Get JSON data from the request body
+        data = request.get_json()
+
+        # --- Improved debugging and validation ---
+        if data is None:
+            logging.warning("No JSON data received in request body")
+            return jsonify({"error": "No JSON data provided in request body"}), 400
+
+        # Use .get() with a default and check explicitly
+        state = data.get('state')
+
+        # Log the received data for debugging
+        logging.info(f"Received data: {data}")
+        logging.info(f"Extracted state: {state}")
+
+        # Check if 'state' key exists and if its value is valid (not None, not empty string)
+        if 'state' not in data or state is None or state == "":
+            logging.warning(f"Invalid or missing 'state'. Data received: {data}")
+            return jsonify({
+                "error": "JSON field 'state' is required and cannot be empty",
+                "received_data": data # Optional: helps debugging
+            }), 400
+        # --- End of improved checks ---
+
+        # Rest of your logic remains the same
         connection = get_db_connection()
         with connection.cursor() as cursor:
             sql = """
-                SELECT DISTINCT city 
+                SELECT DISTINCT city
                 FROM lifeapp.schools
-                WHERE state = %s 
+                WHERE state = %s
                   AND deleted_at IS NULL
                   AND city IS NOT NULL AND city != ''
             """
@@ -4255,9 +4605,12 @@ def get_city_list():
             cities = [row['city'] for row in result]
         return jsonify(cities), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logging.error(f"Error in get_city_list_teacher_dashboard: {e}", exc_info=True)
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
     finally:
-        connection.close()
+        if 'connection' in locals() and connection:
+            connection.close()
+
 
 @app.route('/api/teacher_schools', methods = ['POST'])
 def get_teacher_states():
@@ -5642,7 +5995,7 @@ def get_textbook_mapping_languages():
 # Textbook Mapping Subjects
 @app.route('/api/textbook_mapping_subjects', methods=['GET'])
 def get_textbook_mapping_subjects():
-    sql = "SELECT id, title AS name FROM lifeapp.la_subjects"
+    sql = "SELECT id, JSON_UNQUOTE(JSON_EXTRACT(title, '$.en')) AS name FROM lifeapp.la_subjects"
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
@@ -5687,7 +6040,7 @@ def fetch_textbook_mappings_search():
             tm.id,
             b.name AS board,
             l.title AS language,
-            s.title AS subject,
+            JSON_UNQUOTE(JSON_EXTRACT(s.title, '$.en')) AS subject,
             g.name AS grade,
             tm.title,
             CASE
@@ -11836,6 +12189,111 @@ def update_campaign(id):
         if conn:
             conn.close()
 
+
+@app.route('/api/campaigns/<int:id>/mentor-session', methods=['PUT'])
+def update_campaign_mentor_session(id):
+    """
+    Update specific fields for a Mentor Session campaign (game_type = 8).
+    Also updates the corresponding entry in la_sessions if reference_id matches.
+    Expected fields in request: title, description, status, scheduled_for
+    """
+    logger.info("✏ [PUT] Update Mentor Session campaign ID %s", id)
+    try:
+        # Handle different content types
+        if request.content_type.startswith('application/json'):
+            data = request.get_json()
+        else:
+            data = request.form
+
+        logger.debug(" Data received: %s", data)
+
+        # Extract only the allowed fields for Mentor Session
+        title = data.get('title') or data.get('campaign_title') or '' # Support both names
+        description = data.get('description') or ''
+        scheduled_for = data.get('scheduled_for') or ''
+
+        # Proper status handling
+        try:
+            status_val = int(data.get('status', 1))
+        except (ValueError, TypeError):
+            status_val = 1
+
+        # --- Build SQL for la_campaigns ---
+        campaign_sql = """
+            UPDATE lifeapp.la_campaigns
+            SET title = %s,
+                description = %s,
+                scheduled_for = %s,
+                status = %s,
+        """
+        campaign_params = [title, description, scheduled_for, status_val]
+
+        # Handle ended_at based on status
+        if status_val == 0:
+            campaign_sql += " ended_at = NOW(), "
+        else:
+            campaign_sql += " ended_at = NULL, "
+
+        campaign_sql += " updated_at = NOW() WHERE id = %s AND game_type = 8"
+        campaign_params.append(id)
+
+        conn = get_db_connection()
+        updated_campaign = False
+        updated_session = False
+        session_reference_id = None
+
+        with conn.cursor() as cursor:
+            # Update the campaign
+            logger.debug(" Campaign SQL: %s", campaign_sql)
+            logger.debug(" Campaign Params: %s", campaign_params)
+            cursor.execute(campaign_sql, tuple(campaign_params))
+            
+            if cursor.rowcount == 0:
+                # Either campaign not found or not a Mentor Session
+                logger.warning(" Campaign ID %s not found or not a Mentor Session (game_type != 8)", id)
+                return jsonify({'error': 'Campaign not found or not a Mentor Session'}), 404
+            
+            updated_campaign = True
+
+            # Fetch the reference_id (session id) for potential la_sessions update
+            cursor.execute("SELECT reference_id FROM lifeapp.la_campaigns WHERE id = %s", (id,))
+            campaign_data = cursor.fetchone()
+            if campaign_data:
+                session_reference_id = campaign_data['reference_id']
+
+            # --- Update la_sessions if applicable ---
+            if session_reference_id:
+                session_sql = """
+                    UPDATE lifeapp.la_sessions
+                    SET heading = %s,
+                        description = %s,
+                        date_time = %s
+                    WHERE id = %s
+                """
+                # Assuming date_time in la_sessions should be a datetime, combining date and time (e.g., 00:00:00)
+                # You might want to adjust the time part if needed.
+                session_datetime = f"{scheduled_for} 00:00:00" if scheduled_for else None
+                session_params = [title, description, session_datetime, session_reference_id]
+
+                logger.debug(" Session SQL: %s", session_sql)
+                logger.debug(" Session Params: %s", session_params)
+                cursor.execute(session_sql, tuple(session_params))
+                
+                if cursor.rowcount > 0:
+                    updated_session = True
+
+            conn.commit()
+            logger.info(" Mentor Session campaign ID %s updated. Campaign updated: %s, Session (ID: %s) updated: %s", 
+                        id, updated_campaign, session_reference_id, updated_session)
+            return jsonify({'success': True}), 200
+
+    except Exception as e:
+        logger.error(" Error in PUT /api/campaigns/%s/mentor-session: %s", id, e)
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+
 @app.route('/api/campaigns/<int:id>', methods=['DELETE'])
 def delete_campaign(id):
     conn = get_db_connection()
@@ -12185,3 +12643,4 @@ def handle_mentor_session_details(conn, cursor, session_participant_id):
 
 if __name__ == '__main__':
     app.run(debug=True,  use_reloader=True)
+
