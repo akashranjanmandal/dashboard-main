@@ -505,7 +505,7 @@ export default function VisionSessionsPage() {
                               rel="noopener noreferrer"
                               className="text-primary"
                             >
-                              Vide Link
+                              Video Link
                             </a>
                           ) : (
                             "N/A"
