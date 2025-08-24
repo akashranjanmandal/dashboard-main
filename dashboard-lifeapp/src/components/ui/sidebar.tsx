@@ -378,6 +378,7 @@ export function Sidebar() {
               <NavItem href="/settings/topics" label="Topics" isNested />
               <NavItem href="/settings/category" label="Category" isNested />
               <NavItem href="/settings/coupons" label="Coupons" isNested />
+              <NavItem href="/settings/faqs" label="FAQs" isNested />
               <NavItem
                 href="/settings/notifications"
                 label="Notifications"
