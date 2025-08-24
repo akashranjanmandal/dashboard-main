@@ -6,7 +6,7 @@ import io
 import math
 import traceback
 import requests 
-from flask import Flask, Response, json, jsonify, request
+from flask import Flask, Response, json, jsonify, request, send_file
 from flask_cors import CORS
 import pymysql.cursors
 from datetime import datetime, timedelta, time, timezone
@@ -10616,8 +10616,6 @@ def notification_fetch_user_ids_list():
         if connection and connection.open:
             connection.close()
 
-# --- Updated Filter Endpoints for Notifications ---
-
 # State list endpoint (No changes needed, but ensure it filters correctly)
 @app.route('/api/notification_state_list_schools', methods=['GET'])
 def notification_get_state_list_schools():
@@ -10827,7 +10825,6 @@ def notification_send():
         if connection and connection.open:
             connection.close()
 
-# --- New Routes ---
 
 # --- New Endpoint: Fetch Users by IDs (for Modal Fix) ---
 @app.route('/api/notification_get_users_by_ids', methods=['POST'])
@@ -11112,10 +11109,6 @@ def notification_check_coupon_status():
     finally:
         if connection and connection.open:
             connection.close()
-
-# --- Also add/modify the existing /api/notification_get_filtered_coupons endpoint ---
-# You need to implement this endpoint as discussed previously if you haven't already.
-# Here is the implementation based on the previous discussion:
 
 @app.route('/api/notification_get_filtered_coupons', methods=['POST'])
 def notification_get_filtered_coupons():
@@ -12365,6 +12358,592 @@ def delete_app_setting(key):
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+
+
+###################################################################################
+###################################################################################
+####################### SETTINGS/FAQ APIs #####################################
+###################################################################################
+###################################################################################
+
+# 1. Fetch distinct categories for filters and modals
+@app.route('/api/faq_categories', methods=['GET'])
+def get_faq_categories():
+    """Fetches all FAQ categories (id, name) for dropdowns."""
+    sql = "SELECT id, name FROM lifeapp.la_faq_categories ORDER BY name ASC"
+    try:
+        connection = get_db_connection()
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor: # Ensure DictCursor
+            cursor.execute(sql)
+            result = cursor.fetchall()
+            # Make sure the result is a list, even if empty
+            return jsonify(result if result else []), 200
+    except Exception as e:
+        print(f"Error fetching FAQ categories: {e}")
+        # Include error detail in development, maybe not in production
+        return jsonify({'error': f'Failed to fetch categories: {str(e)}'}), 500
+    finally:
+        connection.close()
+
+# 2. Fetch distinct audiences for filters and modals
+@app.route('/api/faq_audiences', methods=['GET'])
+def get_faq_audiences():
+    """Fetches distinct audience values from la_faq for dropdowns."""
+    sql = """
+        SELECT DISTINCT audience AS name
+        FROM lifeapp.la_faq
+        WHERE audience IS NOT NULL AND audience <> ''
+        ORDER BY audience ASC
+    """
+    try:
+        connection = get_db_connection()
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor: # Ensure DictCursor
+            cursor.execute(sql)
+            raw_result = cursor.fetchall()
+            # Ensure the structure matches frontend expectations ({name: ...})
+            # The SQL alias 'name' should make this correct, but let's be explicit
+            result = [{'name': row['name']} for row in raw_result if row['name']] # Filter out potential None/empty
+            return jsonify(result if result else []), 200
+    except Exception as e:
+        print(f"Error fetching FAQ audiences: {e}")
+        return jsonify({'error': f'Failed to fetch audiences: {str(e)}'}), 500
+    finally:
+        connection.close()
+
+# 3. Fetch FAQs (with optional filtering)
+@app.route('/api/faqs', methods=['GET'])
+def get_faqs():
+    """Fetches FAQs with optional filtering by category name and audience."""
+    category_name = request.args.get('category_name', '').strip()
+    audience = request.args.get('audience', '').strip()
+
+    # Base SQL query joining FAQ with Category
+    # Select category fields separately for easier Python handling
+    sql = """
+        SELECT
+            f.id,
+            f.question,
+            f.answer,
+            f.media_id,
+            f.audience,
+            c.id AS category_id,      -- Select category fields individually
+            c.name AS category_name,
+            f.updated_at
+        FROM lifeapp.la_faq f
+        LEFT JOIN lifeapp.la_faq_categories c ON f.category_id = c.id
+    """
+    where_clauses = []
+    params = []
+
+    # Add filtering conditions
+    if category_name:
+        where_clauses.append("c.name = %s")
+        params.append(category_name)
+    if audience:
+        where_clauses.append("f.audience = %s")
+        params.append(audience)
+
+    if where_clauses:
+        sql += " WHERE " + " AND ".join(where_clauses)
+
+    sql += " ORDER BY f.updated_at DESC"
+
+    try:
+        connection = get_db_connection()
+        # Use DictCursor to get results as dictionaries
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(sql, params)
+            raw_results = cursor.fetchall()
+
+            # Process results to format category as a nested object
+            formatted_results = []
+            for row in raw_results:
+                # Handle potential NULLs from LEFT JOIN
+                category_info = None
+                if row['category_id'] is not None:
+                    category_info = {
+                        'id': row['category_id'],
+                        'name': row['category_name']
+                    }
+                else:
+                    # Handle FAQs with no category assigned (if applicable/possible)
+                    category_info = {'id': None, 'name': 'Uncategorized'}
+
+                # Construct the FAQ object for the response
+                faq_entry = {
+                    'id': row['id'],
+                    'question': row['question'],
+                    'answer': row['answer'],
+                    'media_id': row['media_id'],
+                    'audience': row['audience'],
+                    'category': category_info, # This is now a properly formed dict
+                    'updated_at': row['updated_at'].strftime('%Y-%m-%d %H:%M:%S') if row['updated_at'] else None # Ensure datetime is serializable
+                }
+                formatted_results.append(faq_entry)
+
+            return jsonify(formatted_results if formatted_results else []), 200
+
+    except Exception as e:
+        # Log the full traceback for better debugging
+        import traceback
+        print(f"Error fetching FAQs: {e}")
+        print(traceback.format_exc()) # This will print the full stack trace
+        return jsonify({'error': f'Failed to fetch FAQs: {str(e)}'}), 500
+    finally:
+        if 'connection' in locals() and connection.open:
+            connection.close()
+
+# 4. Add a new FAQ
+@app.route('/api/faqs', methods=['POST'])
+def add_faq():
+    """Adds a new FAQ entry."""
+    connection = None # Initialize connection variable
+    try:
+        # Get form data
+        question = request.form.get('question', '').strip()
+        answer = request.form.get('answer', '').strip()
+        audience = request.form.get('audience', '').strip()
+        category_id = request.form.get('category_id', type=int) # This can raise ValueError
+
+        # Basic validation
+        if not question or not answer or not audience or not category_id:
+            return jsonify({'error': 'Missing required fields: question, answer, audience, category_id'}), 400
+
+        # Optional: Validate that the category_id exists in the database
+        # check_sql = "SELECT id FROM lifeapp.la_faq_categories WHERE id = %s"
+        # temp_conn = get_db_connection()
+        # try:
+        #     with temp_conn.cursor() as check_cursor:
+        #         check_cursor.execute(check_sql, (category_id,))
+        #         if not check_cursor.fetchone():
+        #             return jsonify({'error': f'Invalid category ID: {category_id}'}), 400
+        # finally:
+        #     temp_conn.close()
+
+        sql = """
+            INSERT INTO lifeapp.la_faq
+            (category_id, question, answer, media_id, audience, is_active, created_at, updated_at)
+            VALUES (%s, %s, %s, NULL, %s, 1, NOW(), NOW())
+        """
+        params = (category_id, question, answer, audience)
+
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params)
+            new_id = cursor.lastrowid
+        connection.commit()
+        return jsonify({'message': 'FAQ added successfully', 'id': new_id}), 201
+
+    except ValueError as ve: # Catch specific error for type conversion
+        if connection:
+            connection.rollback()
+        return jsonify({'error': f'Invalid data type provided: {ve}'}), 400
+    except Exception as e:
+        print(f"Error adding FAQ: {e}")
+        if connection:
+            connection.rollback() # Rollback in case of error
+        # Return a more generic error message, log the details server-side
+        return jsonify({'error': 'Failed to add FAQ due to a server error.'}), 500
+    finally:
+        # Ensure connection is closed even if an error occurs
+        if connection and connection.open:
+            connection.close()
+
+# 5. Update an existing FAQ
+@app.route('/api/faqs/<int:faq_id>', methods=['PUT'])
+def update_faq(faq_id):
+    """Updates an existing FAQ entry."""
+    try:
+        # Get form data
+        question = request.form.get('question', '').strip()
+        answer = request.form.get('answer', '').strip()
+        audience = request.form.get('audience', '').strip()
+        category_id = request.form.get('category_id', type=int)
+
+        # Basic validation
+        if not question or not answer or not audience or not category_id:
+             return jsonify({'error': 'Missing required fields: question, answer, audience, category_id'}), 400
+
+        # Check if FAQ exists
+        check_sql = "SELECT id FROM lifeapp.la_faq WHERE id = %s"
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute(check_sql, (faq_id,))
+            if not cursor.fetchone():
+                connection.close()
+                return jsonify({'error': 'FAQ not found'}), 404
+
+        sql = """
+            UPDATE lifeapp.la_faq
+            SET category_id = %s, question = %s, answer = %s, audience = %s, updated_at = NOW()
+            WHERE id = %s
+        """
+        params = (category_id, question, answer, audience, faq_id)
+
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params)
+        connection.commit()
+        connection.close()
+        return jsonify({'message': 'FAQ updated successfully'}), 200
+
+    except ValueError as ve:
+        return jsonify({'error': f'Invalid data type: {ve}'}), 400
+    except Exception as e:
+        print(f"Error updating FAQ ID {faq_id}: {e}")
+        connection.rollback() # Rollback in case of error
+        return jsonify({'error': 'Failed to update FAQ'}), 500
+    finally:
+        if 'connection' in locals() and connection.open:
+            connection.close()
+
+# 6. Delete an FAQ
+@app.route('/api/faqs/<int:faq_id>', methods=['DELETE'])
+def delete_faq(faq_id):
+    """Deletes an FAQ entry."""
+    try:
+        # Check if FAQ exists
+        check_sql = "SELECT id FROM lifeapp.la_faq WHERE id = %s"
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute(check_sql, (faq_id,))
+            if not cursor.fetchone():
+                connection.close()
+                return jsonify({'error': 'FAQ not found'}), 404
+
+        sql = "DELETE FROM lifeapp.la_faq WHERE id = %s"
+        with connection.cursor() as cursor:
+            cursor.execute(sql, (faq_id,))
+        connection.commit()
+        connection.close()
+        return jsonify({'message': 'FAQ deleted successfully'}), 200
+
+    except Exception as e:
+        print(f"Error deleting FAQ ID {faq_id}: {e}")
+        connection.rollback() # Rollback in case of error
+        return jsonify({'error': 'Failed to delete FAQ'}), 500
+    finally:
+        if 'connection' in locals() and connection.open:
+            connection.close()
+
+# 7. Add a new FAQ Category
+@app.route('/api/faq_categories', methods=['POST'])
+def add_faq_category():
+    """Adds a new FAQ category."""
+    try:
+        data = request.form # Or request.get_json() if sending JSON
+        name = data.get('name', '').strip()
+        description = data.get('description', '').strip() # Description is optional based on schema
+
+        if not name:
+            return jsonify({'error': 'Category name is required'}), 400
+
+        # Optional: Check for duplicate category name
+        # check_sql = "SELECT id FROM lifeapp.la_faq_categories WHERE name = %s"
+        # with get_db_connection().cursor() as cursor:
+        #     cursor.execute(check_sql, (name,))
+        #     if cursor.fetchone():
+        #         return jsonify({'error': 'Category name already exists'}), 400
+
+        sql = """
+            INSERT INTO lifeapp.la_faq_categories
+            (name, description, created_at, updated_at)
+            VALUES (%s, %s, NOW(), NOW())
+        """
+        params = (name, description)
+
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params)
+            new_id = cursor.lastrowid
+        connection.commit()
+        connection.close()
+        return jsonify({'message': 'Category added successfully', 'id': new_id}), 201
+
+    except Exception as e:
+        print(f"Error adding FAQ category: {e}")
+        connection.rollback()
+        return jsonify({'error': 'Failed to add category'}), 500
+    finally:
+       if 'connection' in locals() and connection.open:
+            connection.close()
+
+# 8. Bulk Upload FAQs from CSV
+
+@app.route('/api/bulk_upload_faqs', methods=['POST'])
+def bulk_upload_faqs():
+    """Handles bulk upload of FAQs via CSV."""
+    # 1. Check if file was sent
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part in the request'}), 400
+
+    file = request.files['file']
+
+    # 2. Check if file was selected
+    if file.filename == '':
+        return jsonify({'error': 'No file selected for upload'}), 400
+
+    # 3. Check file type
+    if file and file.filename.endswith('.csv'):
+        connection = None
+        cursor = None
+        try:
+            # 4. Read and decode CSV content
+            # Use utf-8-sig to handle potential Byte Order Mark (BOM)
+            stream = io.StringIO(file.stream.read().decode("utf-8-sig"), newline=None)
+            csv_input = csv.reader(stream)
+
+            # 5. Validate header row
+            header = next(csv_input, None)
+            expected_header = ['question', 'answer', 'category_name', 'audience']
+            if not header or header != expected_header:
+                 return jsonify({'error': f'Invalid CSV header. Expected: {expected_header}'}), 400
+
+            processed_count = 0
+            errors = []
+
+            # 6. Get DB connection
+            connection = get_db_connection()
+            # Use a standard cursor. If your get_db_connection returns DictCursor by default,
+            # this ensures we get tuples/lists for fetchone results in this function.
+            # Alternatively, if you know it returns DictCursor, handle results as dicts.
+            # Let's assume standard cursor returns tuples.
+            cursor = connection.cursor() 
+
+            # 7. Process data rows
+            for row_num, row in enumerate(csv_input, start=2): # Start from row 2 (after header)
+                try:
+                    # --- Robust Row Validation and Unpacking ---
+                    if len(row) != 4:
+                        errors.append(f"Row {row_num}: Invalid number of columns. Expected 4, got {len(row)}.")
+                        continue
+
+                    # Strip whitespace from all fields
+                    question_raw, answer_raw, category_name_raw, audience_raw = row
+                    question = question_raw.strip()
+                    answer = answer_raw.strip()
+                    category_name = category_name_raw.strip()
+                    audience = audience_raw.strip()
+
+                    # Check for required fields
+                    if not all([question, answer, category_name, audience]):
+                        errors.append(f"Row {row_num}: Missing required field(s).")
+                        continue
+
+                    # --- Category Lookup ---
+                    cat_sql = "SELECT id FROM lifeapp.la_faq_categories WHERE name = %s"
+                    cursor.execute(cat_sql, (category_name,))
+                    cat_result = cursor.fetchone()
+                    print(f"DEBUG: Row {row_num} - Raw category lookup result type: {type(cat_result)}, value: {cat_result}") # Temporary debug
+
+                    if not cat_result:
+                        errors.append(f"Row {row_num}: Category '{category_name}' not found in the database.")
+                        continue # Skip this row
+
+                    # --- CORRECTED: Access category ID from DictCursor result ---
+                    # Handle case where cursor returns a dictionary like {'id': 4}
+                    # Check if it's a dictionary first for safety
+                    if isinstance(cat_result, dict):
+                        category_id = cat_result['id']
+                    else:
+                        # Fallback to tuple/list access if it's not a dict (less likely now)
+                        category_id = cat_result[0]
+                    # --- END CORRECTION ---
+
+                    # --- Audience Validation ---
+                    # Check against the known ENUM values in the database schema
+                    valid_audiences = {'all', 'teacher', 'student'}
+                    if audience not in valid_audiences:
+                         errors.append(f"Row {row_num}: Invalid audience '{audience}'. Must be one of {sorted(valid_audiences)}.")
+                         continue # Skip this row
+
+                    # --- PREPARE Insert Data ---
+                    # Explicitly cast/prepare data for insertion to catch type errors early
+                    insert_data = (
+                        int(category_id),  # Ensure category_id is an integer
+                        str(question),     # Ensure question is a string
+                        str(answer),       # Ensure answer is a string
+                        str(audience)      # Ensure audience is a string (from valid_audiences)
+                    )
+
+                    # --- Insert FAQ ---
+                    insert_sql = """
+                        INSERT INTO lifeapp.la_faq
+                        (category_id, question, answer, media_id, audience, is_active, created_at, updated_at)
+                        VALUES (%s, %s, %s, NULL, %s, 1, NOW(), NOW())
+                    """
+                    # Execute the insert with prepared data
+                    cursor.execute(insert_sql, insert_data)
+                    processed_count += 1
+
+                except ValueError as ve: # Catch specific data conversion errors per row
+                    error_detail = f"Row {row_num}: Data type error - {str(ve)}."
+                    print(f"Bulk Upload Debug - ValueError (Row {row_num}): {error_detail}") # Log for server
+                    errors.append(error_detail)
+                    continue
+                except Exception as row_error: # Catch any other unexpected error for this specific row
+                    # Provide more detail in logs if possible
+                    tb_str = traceback.format_exc()
+                    error_detail = f"Row {row_num}: Unexpected processing error - {str(row_error)}."
+                    print(f"Bulk Upload Debug - Exception (Row {row_num}): {error_detail}\nTraceback: {tb_str}") # Log for server
+                    errors.append(error_detail)
+                    continue # Continue processing other rows
+
+            # 8. Commit transaction if processing rows finished
+            # (Individual row errors do not prevent committing successful inserts)
+            if connection:
+                connection.commit()
+
+            # 9. Prepare response
+            response_data = {
+                'message': f'Bulk upload completed. {processed_count} FAQs processed successfully.',
+                'processed': processed_count,
+                'errors': errors
+            }
+            if errors:
+                response_data['message'] += f" {len(errors)} row(s) had errors."
+                # Return 207 Multi-Status for partial success/failure
+                return jsonify(response_data), 207
+            else:
+                # Return 201 Created if all successful
+                return jsonify(response_data), 201
+
+        except csv.Error as csv_err: # Catch errors specifically from the csv module
+            error_msg = f"CSV parsing error: {str(csv_err)}"
+            print(f"Bulk Upload Debug - CSV Error: {error_msg}") # Log for server
+            if connection:
+                connection.rollback()
+            return jsonify({'error': f'Failed to parse CSV file. {error_msg}'}), 400
+
+        except Exception as e: # Catch any other unexpected errors during the whole process
+            error_msg = f"Failed to process CSV file: {str(e)}"
+            tb_str = traceback.format_exc()
+            print(f"Bulk Upload Debug - General Error: {error_msg}\nTraceback: {tb_str}") # Log for server
+            if connection:
+                connection.rollback()
+            # Return a generic 500 error, but log the details server-side
+            return jsonify({'error': 'An internal server error occurred during bulk upload. Please check the server logs for details.'}), 500
+
+        finally:
+            # 10. Cleanup resources
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass # Ignore errors closing cursor
+            if connection:
+                try:
+                    if connection.open:
+                        connection.close()
+                except:
+                    pass # Ignore errors closing connection
+            # File stream is consumed by csv.reader, no need to close explicitly here
+
+    else:
+        return jsonify({'error': 'Invalid file type. Please upload a CSV file (.csv).'}), 400
+
+# 9. Download CSV Template
+@app.route('/api/faq_template.csv', methods=['GET'])
+def download_faq_template():
+    """Provides a downloadable CSV template for bulk upload."""
+    try:
+        # Hardcode sample data for robustness and clarity
+        # Using the sample data provided in the knowledge base
+        sample_rows = [
+            ("How do I submit my mission?", "Go to the Missions section in the app, open your mission, and click on Submit after uploading your work.", "mission", "student"),
+            ("How can I reset my password?", "You can reset your password from the login page by clicking on “Forgot Password” and following the instructions.", "profile", "all"),
+            ("How do I review student submissions?", "Open the Teacher Dashboard, navigate to Student Submissions, and click Review to approve or reject.", "mission", "teacher")
+        ]
+
+        # Create CSV content in memory using StringIO
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # Write header row
+        writer.writerow(['question', 'answer', 'category_name', 'audience'])
+
+        # Write sample data rows
+        writer.writerows(sample_rows)
+
+        # Get the CSV string data
+        csv_data = output.getvalue()
+        output.close()
+
+        # Prepare the data for send_file using BytesIO with explicit UTF-8 encoding
+        mem = io.BytesIO()
+        mem.write(csv_data.encode('utf-8')) # Ensure UTF-8 encoding
+        mem.seek(0)
+
+        # Send the CSV file as an attachment
+        return send_file(
+            mem,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name='faq_bulk_upload_template.csv' # Use download_name for newer Flask versions
+            # For older Flask versions, you might need `attachment_filename` instead
+            # attachment_filename='faq_bulk_upload_template.csv'
+        )
+
+    except Exception as e:
+        error_msg = f"Error generating FAQ template: {e}"
+        print(error_msg) # Log the error server-side
+        # In case of error generating the CSV, send a simple text error response
+        return error_msg, 500
+
+    """Provides a downloadable CSV template for bulk upload."""
+    try:
+        # Option 1: Dynamically generate from existing data (first 3 rows as requested)
+        # sql = """
+        #     SELECT f.question, f.answer, c.name AS category_name, f.audience
+        #     FROM lifeapp.la_faq f
+        #     JOIN lifeapp.la_faq_categories c ON f.category_id = c.id
+        #     ORDER BY f.id ASC
+        #     LIMIT 3
+        # """
+        # connection = get_db_connection()
+        # with connection.cursor() as cursor:
+        #     cursor.execute(sql)
+        #     rows = cursor.fetchall()
+        # connection.close()
+
+        # Option 2: Hardcode sample data (more robust if DB is empty initially)
+        # Using the sample data provided in the knowledge base
+        rows = [
+            ("How do I submit my mission?", "Go to the Missions section in the app, open your mission, and click on Submit after uploading your work.", "mission", "student"),
+            ("How can I reset my password?", "You can reset your password from the login page by clicking on “Forgot Password” and following the instructions.", "profile", "all"),
+            ("How do I review student submissions?", "Open the Teacher Dashboard, navigate to Student Submissions, and click Review to approve or reject.", "mission", "teacher")
+        ]
+
+        # Create CSV in memory
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # Write header
+        writer.writerow(['question', 'answer', 'category_name', 'audience'])
+
+        # Write data rows
+        writer.writerows(rows)
+
+        # Prepare response
+        csv_data = output.getvalue()
+        output.close()
+
+        # Create a BytesIO object for send_file
+        mem = io.BytesIO()
+        mem.write(csv_data.encode('utf-8'))
+        mem.seek(0)
+
+        return send_file(
+            mem,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name='faq_bulk_upload_template.csv'
+        )
+
+    except Exception as e:
+        print(f"Error generating FAQ template: {e}")
+        # Return a simple error CSV or plain text error
+        return "Error generating template", 500
+
 
 
 ###################################################################################
