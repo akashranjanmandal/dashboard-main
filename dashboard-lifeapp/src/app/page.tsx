@@ -8,6 +8,7 @@ import { useState, useEffect, useRef } from "react";
 import NumberFlow from "@number-flow/react";
 import LogoutButton from "@/components/logoutButton";
 import Papa from "papaparse";
+import * as XLSX from "xlsx";
 import {
   AreaChart,
   XAxis,
@@ -105,7 +106,7 @@ const inter = Inter({ subsets: ["latin"] });
 //const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
 // const api_startpoint = 'http://152.42.239.141:5000'
 const api_startpoint = 'http://152.42.239.141:5000'
-// const api_startpoint = "http://localhost:5000";
+// const api_startpoint = "http://127.0.0.1:5000";
 // const api_startpoint = 'https://abcd-12-34-56-78.ngrok-free.app'
 
 interface userTypeChart {
@@ -315,7 +316,7 @@ export default function UserAnalyticsDashboard() {
     return filterParams;
   };
 
-  // Export all dashboard data to CSV
+  // Export all dashboard data to Excel with multiple sheets
   const exportDashboardData = async () => {
     try {
       setLoading(true);
@@ -555,27 +556,276 @@ export default function UserAnalyticsDashboard() {
         });
       }
 
-      // Generate timestamp for filename
+      // Convert to Excel and download
+      const workbook = XLSX.utils.book_new();
+
+      // Create metadata sheet
+      const metadataSheet = XLSX.utils.aoa_to_sheet([
+        ["LifeApp Dashboard Export Report"],
+        ["Export Date:", new Date().toLocaleString()],
+        ["Dashboard Version:", "LifeApp Dashboard v1.0"],
+        [],
+        ["Applied Filters:"],
+        ["State:", globalFilters.state || "All"],
+        ["City:", globalFilters.city || "All"],
+        ["School Code:", globalFilters.schoolCode || "All"],
+        ["User Type:", globalFilters.userType || "All"],
+        ["Grade:", globalFilters.grade || "All"],
+        ["Gender:", globalFilters.gender || "All"],
+        ["Date Range:", globalFilters.dateRange || "All"],
+        ["Start Date:", globalFilters.startDate || "All"],
+        ["End Date:", globalFilters.endDate || "All"],
+        [],
+        ["Summary Metrics:"],
+        ["Total Users:", totalUsers || 0],
+        ["Active Users:", activeUsers || 0],
+        ["New Signups:", newSignups || 0],
+        ["Approval Rate (%):", approvalRate || 0],
+        ["Total Downloads:", 45826],
+        ["Total Coins Earned:", totalPointsEarned || 0],
+        ["Total Coins Redeemed:", totalPointsRedeemed || 0],
+        ["Total No. of Schools:", schoolCount || 0],
+        ["Total No. of Quiz Completes:", quizCompletes || 0],
+        ["Total Sessions Created by Mentors:", sessions?.length || 0],
+        [
+          "Total Participants Joined Mentor Sessions:",
+          sessionParticipantTotal || 0,
+        ],
+        [
+          "Total Mentors Participated for Mentor Connect Sessions:",
+          mentorsParticipatedSessionsTotal || 0,
+        ],
+        ["Total Teachers:", totalTeachers || 0],
+        ["Total Students:", totalStudents || 0],
+        ["Total Mission Completes:", tmcTotal || 0],
+        ["Total Jigyasa Completes:", tjcTotal || 0],
+        ["Total Pragya Completes:", tpcTotal || 0],
+        ["Total Quiz Completes:", tqcTotal || 0],
+        ["Total Riddle Completes:", trcTotal || 0],
+        ["Total Puzzle Completes:", tpzcTotal || 0],
+        ["Total PBL Mission Completes:", totalCountPBL || 0],
+        ["Total Vision Completes:", totalVisionSubmitted || 0],
+        ["Total Vision Score Earned:", totalVisionScore || 0],
+      ]);
+      XLSX.utils.book_append_sheet(
+        workbook,
+        metadataSheet,
+        "Summary & Filters"
+      );
+
+      // Export User Signups Over Time to separate sheet
+      if (EchartData && EchartData.length > 0) {
+        const signupData = EchartData.map((item) => ({
+          Period: item.period,
+          Total_Count: item.count,
+          Admin: item.Admin || 0,
+          Student: item.Student || 0,
+          Mentor: item.Mentor || 0,
+          Teacher: item.Teacher || 0,
+          Unspecified: item.Unspecified || 0,
+        }));
+        const signupSheet = XLSX.utils.json_to_sheet(signupData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          signupSheet,
+          "User Signups Over Time"
+        );
+      }
+
+      // Export User Type Distribution to separate sheet
+      if (userTypeData && userTypeData.length > 0) {
+        const userTypeSheet = XLSX.utils.json_to_sheet(userTypeData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          userTypeSheet,
+          "User Type Distribution"
+        );
+      }
+
+      // Export Schools by State to separate sheet
+      if (stateCounts && stateCounts.length > 0) {
+        const stateData = stateCounts.map((item) => ({
+          State: item.state,
+          School_Count: item.count_state,
+        }));
+        const stateSheet = XLSX.utils.json_to_sheet(stateData);
+        XLSX.utils.book_append_sheet(workbook, stateSheet, "Schools by State");
+      }
+
+      // Export Coupon Redemptions to separate sheet
+      if (couponRedeemCount && couponRedeemCount.length > 0) {
+        const couponData = couponRedeemCount.map((item) => ({
+          Amount: item.amount,
+          Coupon_Count: item.coupon_count,
+        }));
+        const couponSheet = XLSX.utils.json_to_sheet(couponData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          couponSheet,
+          "Coupon Redemptions"
+        );
+      }
+
+      // Export Students by Grade to separate sheet
+      if (EchartDataGrade && EchartDataGrade.length > 0) {
+        const gradeSheet = XLSX.utils.json_to_sheet(EchartDataGrade);
+        XLSX.utils.book_append_sheet(workbook, gradeSheet, "Students by Grade");
+      }
+
+      // Export Teachers by Grade to separate sheet
+      if (EchartDataTeacherGrade && EchartDataTeacherGrade.length > 0) {
+        const teacherGradeSheet = XLSX.utils.json_to_sheet(
+          EchartDataTeacherGrade
+        );
+        XLSX.utils.book_append_sheet(
+          workbook,
+          teacherGradeSheet,
+          "Teachers by Grade"
+        );
+      }
+
+      // Export Students by State to separate sheet
+      if (chartStudentsData && chartStudentsData.length > 0) {
+        const studentStateData = chartStudentsData.map((item) => ({
+          State: item.code,
+          Student_Count: item.value,
+        }));
+        const studentStateSheet = XLSX.utils.json_to_sheet(studentStateData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          studentStateSheet,
+          "Students by State"
+        );
+      }
+
+      // Export Teachers by State to separate sheet
+      if (chartTeacherData && chartTeacherData.length > 0) {
+        const teacherStateData = chartTeacherData.map((item) => ({
+          State: item.code,
+          Teacher_Count: item.value,
+        }));
+        const teacherStateSheet = XLSX.utils.json_to_sheet(teacherStateData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          teacherStateSheet,
+          "Teachers by State"
+        );
+      }
+
+      // Export Mission Data to separate sheet
+      if (missionData && missionData.length > 0) {
+        const missionSheet = XLSX.utils.json_to_sheet(missionData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          missionSheet,
+          "Mission Completion Data"
+        );
+      }
+
+      // Export Jigyasa Data to separate sheet
+      if (jigyasaData && jigyasaData.length > 0) {
+        const jigyasaSheet = XLSX.utils.json_to_sheet(jigyasaData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          jigyasaSheet,
+          "Jigyasa Completion Data"
+        );
+      }
+
+      // Export Pragya Data to separate sheet
+      if (pragyaData && pragyaData.length > 0) {
+        const pragyaSheet = XLSX.utils.json_to_sheet(pragyaData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          pragyaSheet,
+          "Pragya Completion Data"
+        );
+      }
+
+      // Export Quiz Data to separate sheet
+      if (quizData && quizData.length > 0) {
+        const quizSheet = XLSX.utils.json_to_sheet(quizData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          quizSheet,
+          "Quiz Completion Data"
+        );
+      }
+
+      // Export Vision Statistics to separate sheet
+      if (statsVision && statsVision.length > 0) {
+        const visionSheet = XLSX.utils.json_to_sheet(statsVision);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          visionSheet,
+          "Vision Statistics"
+        );
+      }
+
+      // Export Points Data to separate sheets
+      if (pointsMissionData && pointsMissionData.length > 0) {
+        const missionPointsSheet = XLSX.utils.json_to_sheet(pointsMissionData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          missionPointsSheet,
+          "Mission Points Over Time"
+        );
+      }
+
+      if (pointsQuizData && pointsQuizData.length > 0) {
+        const quizPointsSheet = XLSX.utils.json_to_sheet(pointsQuizData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          quizPointsSheet,
+          "Quiz Points Over Time"
+        );
+      }
+
+      if (pointsJigyasaData && pointsJigyasaData.length > 0) {
+        const jigyasaPointsSheet = XLSX.utils.json_to_sheet(pointsJigyasaData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          jigyasaPointsSheet,
+          "Jigyasa Points Over Time"
+        );
+      }
+
+      if (pointsPragyaData && pointsPragyaData.length > 0) {
+        const pragyaPointsSheet = XLSX.utils.json_to_sheet(pointsPragyaData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          pragyaPointsSheet,
+          "Pragya Points Over Time"
+        );
+      }
+
+      // Export Coupon Redeems Data Over Time to separate sheet
+      if (couponRedeemsData && couponRedeemsData.length > 0) {
+        const couponRedeemsSheet = XLSX.utils.json_to_sheet(couponRedeemsData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          couponRedeemsSheet,
+          "Coupon Redeems Over Time"
+        );
+      }
+
+      // Export Student Detailed Data if available
+      if (studentData && studentData.length > 0) {
+        const studentSheet = XLSX.utils.json_to_sheet(studentData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          studentSheet,
+          "Student Detailed Data"
+        );
+      }
+
+      // Generate filename with timestamp and save
       const timestamp = new Date()
         .toISOString()
-        .replace(/[:.]/g, "-")
-        .slice(0, -5);
-      const filename = `dashboard-export-${timestamp}.csv`;
-
-      // Convert to CSV and download
-      const csv = Papa.unparse(exportData);
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const link = document.createElement("a");
-
-      if (link.download !== undefined) {
-        const url = URL.createObjectURL(blob);
-        link.setAttribute("href", url);
-        link.setAttribute("download", filename);
-        link.style.visibility = "hidden";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      }
+        .slice(0, 19)
+        .replace(/:/g, "-");
+      const filename = `LifeApp_Dashboard_Export_${timestamp}.xlsx`;
+      XLSX.writeFile(workbook, filename);
 
       setLoading(false);
     } catch (error) {
@@ -617,17 +867,20 @@ export default function UserAnalyticsDashboard() {
     // Fetch available states
     const fetchStates = async () => {
       try {
-        const res = await fetch(`${api_startpoint}/api/count-school-state`);
+        console.log("Fetching states...");
+        const res = await fetch(`${api_startpoint}/api/all-states-dropdown`);
         const data = await res.json();
+        console.log("States response:", data);
         if (data && Array.isArray(data) && data.length > 0) {
-          const states = [
-            "All",
-            ...data.map((item: { state: string }) => item.state),
-          ];
+          const states = ["All", ...data];
           setAvailableStates(states);
+        } else {
+          console.warn("Invalid states data:", data);
+          setAvailableStates(["All"]);
         }
       } catch (error) {
         console.error("Error fetching states:", error);
+        setAvailableStates(["All"]);
       }
     };
 
@@ -758,10 +1011,21 @@ export default function UserAnalyticsDashboard() {
         return response.json();
       })
       .then((data) => {
+        console.log("Signing user response:", data);
         // Transform the flat data into a pivot table keyed by period.
         // For each row (with period, user_type, count), accumulate the value.
         const groupedData: { [period: string]: EchartSignup } = {};
-        (data.data as ApiSignupData[]).forEach((row) => {
+
+        // Handle both formats: { data: [...] } and direct array [...]
+        const dataArray = data.data || data;
+        if (!Array.isArray(dataArray)) {
+          console.warn("Invalid signing user data format:", data);
+          setEChartData([]);
+          setLoading(false);
+          return;
+        }
+
+        (dataArray as ApiSignupData[]).forEach((row) => {
           // Use a fallback if period is null.
           const period = row.period || "Unknown";
           if (!groupedData[period]) {
@@ -774,7 +1038,9 @@ export default function UserAnalyticsDashboard() {
         setLoading(false);
       })
       .catch((err) => {
+        console.error("Error fetching signing user data:", err);
         setError(err.message);
+        setEChartData([]); // Ensure it's never undefined
         setLoading(false);
       });
   }, [grouping, selectedUserType, globalFilters]);
@@ -786,35 +1052,35 @@ export default function UserAnalyticsDashboard() {
       name: "Admin",
       type: "bar",
       stack: "total",
-      data: EchartData.map((item) => item.Admin || 0),
+      data: (EchartData || []).map((item) => item.Admin || 0),
       itemStyle: { color: "#1E3A8A" },
     },
     {
       name: "Student",
       type: "bar",
       stack: "total",
-      data: EchartData.map((item) => item.Student || 0),
+      data: (EchartData || []).map((item) => item.Student || 0),
       itemStyle: { color: "#3B82F6" },
     },
     {
       name: "Mentor",
       type: "bar",
       stack: "total",
-      data: EchartData.map((item) => item.Mentor || 0),
+      data: (EchartData || []).map((item) => item.Mentor || 0),
       itemStyle: { color: "#60A5FA" },
     },
     {
       name: "Teacher",
       type: "bar",
       stack: "total",
-      data: EchartData.map((item) => item.Teacher || 0),
+      data: (EchartData || []).map((item) => item.Teacher || 0),
       itemStyle: { color: "#93C5FD" },
     },
     {
       name: "Unspecified",
       type: "bar",
       stack: "total",
-      data: EchartData.map((item) => item.Unspecified || 0),
+      data: (EchartData || []).map((item) => item.Unspecified || 0),
       itemStyle: { color: "#0F172A" },
     },
   ];
@@ -830,8 +1096,8 @@ export default function UserAnalyticsDashboard() {
   //   fetchDataEcharts(grouping);
   // }, [grouping]);
   // Configure the ECharts option
-  const periodsUserSignups = EchartData.map((item) => item.period);
-  const totalCountsUserSignups = EchartData.map(
+  const periodsUserSignups = (EchartData || []).map((item) => item.period);
+  const totalCountsUserSignups = (EchartData || []).map(
     (item) =>
       (item.Admin || 0) +
       (item.Student || 0) +
@@ -885,7 +1151,9 @@ export default function UserAnalyticsDashboard() {
     },
     xAxis: {
       type: "category",
-      data: EchartData.map((item) => formatPeriod(item.period, grouping)),
+      data: (EchartData || []).map((item) =>
+        formatPeriod(item.period, grouping)
+      ),
       boundaryGap: grouping === "lifetime" ? true : false,
       axisLabel: {
         // Rotate labels for daily grouping for better readability
@@ -1116,10 +1384,11 @@ export default function UserAnalyticsDashboard() {
   useEffect(() => {
     async function fetchCouponRedeemCount() {
       try {
-        const filterParams = buildFilterParams();
-        const res = await fetch(
-          `${api_startpoint}/api/coupons-used-count?${filterParams}`
-        );
+        const res = await fetch(`${api_startpoint}/api/coupons-used-count`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildFilterParams()),
+        });
         const data = await res.json();
         if (data && Array.isArray(data) && data.length > 0) {
           setCouponRedeemCount(data);
@@ -1135,10 +1404,10 @@ export default function UserAnalyticsDashboard() {
   }, [globalFilters]);
 
   const pieChartData = {
-    labels: couponRedeemCount.map((item) => item.amount),
+    labels: (couponRedeemCount || []).map((item) => item.amount),
     datasets: [
       {
-        data: couponRedeemCount.map((item) => item.coupon_count),
+        data: (couponRedeemCount || []).map((item) => item.coupon_count),
         backgroundColor: [
           "#6549b9",
           "#FF8C42",
@@ -1172,15 +1441,20 @@ export default function UserAnalyticsDashboard() {
   useEffect(() => {
     async function fetchTeacherAssignCounts() {
       try {
-        const filterParams = buildFilterParams();
-        const res = await fetch(
-          `${api_startpoint}/api/teacher-assign-count?${filterParams}`
-        );
+        const res = await fetch(`${api_startpoint}/api/teacher-assign-count`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildFilterParams()),
+        });
         const data = await res.json();
-        const counts = data.map(
-          (item: { assign_count: number }) => item.assign_count
-        );
-        setAssignCounts(counts);
+        if (data && Array.isArray(data) && data.length > 0) {
+          const counts = data.map(
+            (item: { assign_count: number }) => item.assign_count
+          );
+          setAssignCounts(counts);
+        } else {
+          setAssignCounts([]);
+        }
       } catch (error) {
         console.error("Error fetching teacher assignment counts:", error);
       }
@@ -1298,11 +1572,11 @@ export default function UserAnalyticsDashboard() {
     fetchSchoolStateCounts();
   }, [globalFilters]);
   const schoolStateData = {
-    labels: stateCounts.map((item) => item.state),
+    labels: (stateCounts || []).map((item) => item.state),
     datasets: [
       {
         label: "No. of Schools",
-        data: stateCounts.map((item) => item.count_state),
+        data: (stateCounts || []).map((item) => item.count_state),
         backgroundColor: "#4A90E2",
         // Adding border radius to each bar
         borderRadius: 15,
@@ -1344,16 +1618,20 @@ export default function UserAnalyticsDashboard() {
   useEffect(() => {
     async function fetchUserType() {
       try {
-        const filterParams = buildFilterParams();
-        const res = await fetch(
-          `${api_startpoint}/api/user-type-chart?${filterParams}`
-        );
+        const res = await fetch(`${api_startpoint}/api/user-type-chart`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildFilterParams()),
+        });
         const data = await res.json();
-        if (data && data.length > 0) {
+        if (data && Array.isArray(data) && data.length > 0) {
           setUserTypeData(data);
+        } else {
+          setUserTypeData([]);
         }
       } catch (error) {
         console.error("Error fetching user type:", error);
+        setUserTypeData([]);
       }
     }
     fetchUserType();
@@ -1387,7 +1665,7 @@ export default function UserAnalyticsDashboard() {
         type: "pie",
         radius: "55%", // Creates a donut effect for better label spacing
         center: ["50%", "50%"],
-        data: userTypeData.map((item, index) => ({
+        data: (userTypeData || []).map((item, index) => ({
           value: item.count,
           name: item.userType || "Unknown",
           itemStyle: { color: deepBlueColors[index % deepBlueColors.length] },
@@ -1526,7 +1804,10 @@ export default function UserAnalyticsDashboard() {
     fetch(`${api_startpoint}/api/students-by-grade-over-time`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ grouping: selectedGrouping }),
+      body: JSON.stringify({
+        grouping: selectedGrouping,
+        ...buildFilterParams(),
+      }),
     })
       .then((response) => {
         if (!response.ok) {
@@ -1562,7 +1843,7 @@ export default function UserAnalyticsDashboard() {
   // Fetch whenever groupingGrade changes
   useEffect(() => {
     fetchDataGrade(groupingGrade);
-  }, [groupingGrade]);
+  }, [groupingGrade, globalFilters]);
 
   // Determine unique grade keys for the legend/series from EchartDataGrade
   const uniqueGrades = Array.from(
@@ -1584,7 +1865,7 @@ export default function UserAnalyticsDashboard() {
     name: grade,
     type: "bar",
     stack: "total",
-    data: EchartDataGrade.map((item) => item[grade] || 0),
+    data: (EchartDataGrade || []).map((item) => item[grade] || 0),
     itemStyle: {
       // Use a color palette
       color: ["#1E3A8A", "#3B82F6", "#60A5FA", "#93C5FD", "#DB2777", "#6B7280"][
@@ -1593,8 +1874,8 @@ export default function UserAnalyticsDashboard() {
     },
   }));
 
-  const periodsGrade = EchartDataGrade.map((item) => item.period);
-  const totalCountsStudentGrade = EchartDataGrade.map((item) =>
+  const periodsGrade = (EchartDataGrade || []).map((item) => item.period);
+  const totalCountsStudentGrade = (EchartDataGrade || []).map((item) =>
     // sum up every grade key in this item
     Object.keys(item)
       .filter((k) => k !== "period")
@@ -1651,7 +1932,7 @@ export default function UserAnalyticsDashboard() {
     },
     xAxis: {
       type: "category",
-      data: EchartDataGrade.map((item) =>
+      data: (EchartDataGrade || []).map((item) =>
         formatPeriod(item.period, groupingGrade)
       ),
       boundaryGap: groupingGrade === "lifetime" ? true : false,
@@ -1705,7 +1986,10 @@ export default function UserAnalyticsDashboard() {
     fetch(`${api_startpoint}/api/teachers-by-grade-over-time`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ grouping: selectedGrouping }),
+      body: JSON.stringify({
+        grouping: selectedGrouping,
+        ...buildFilterParams(),
+      }),
     })
       .then((response) => {
         if (!response.ok) {
@@ -1740,7 +2024,7 @@ export default function UserAnalyticsDashboard() {
   // Fetch new data whenever the grouping filter changes.
   useEffect(() => {
     fetchDataTeacherGrade(groupingTeacherGrade);
-  }, [groupingTeacherGrade]);
+  }, [groupingTeacherGrade, globalFilters]);
 
   // Determine the unique teacher grade keys for the legend and series.
   const uniqueGradesTeacher = Array.from(
@@ -1760,7 +2044,7 @@ export default function UserAnalyticsDashboard() {
     name: grade,
     type: "bar",
     stack: "total",
-    data: EchartDataTeacherGrade.map((item) => item[grade] || 0),
+    data: (EchartDataTeacherGrade || []).map((item) => item[grade] || 0),
     itemStyle: {
       // Set colors as desired.
       color: ["#1E3A8A", "#3B82F6", "#60A5FA", "#93C5FD", "#DB2777", "#6B7280"][
@@ -1769,8 +2053,10 @@ export default function UserAnalyticsDashboard() {
     },
   }));
 
-  const periodsTeacherGrade = EchartDataTeacherGrade.map((item) => item.period);
-  const totalCountsTeacherGrade = EchartDataTeacherGrade.map((item) =>
+  const periodsTeacherGrade = (EchartDataTeacherGrade || []).map(
+    (item) => item.period
+  );
+  const totalCountsTeacherGrade = (EchartDataTeacherGrade || []).map((item) =>
     // sum up every grade key in this item
     Object.keys(item)
       .filter((k) => k !== "period")
@@ -1827,7 +2113,7 @@ export default function UserAnalyticsDashboard() {
     },
     xAxis: {
       type: "category",
-      data: EchartDataTeacherGrade.map((item) =>
+      data: (EchartDataTeacherGrade || []).map((item) =>
         formatPeriod(item.period, groupingTeacherGrade)
       ),
       boundaryGap: groupingTeacherGrade === "lifetime" ? true : false,
@@ -1977,6 +2263,8 @@ export default function UserAnalyticsDashboard() {
           `${api_startpoint}/api/demograph-students`,
           {
             method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(buildFilterParams()),
           }
         );
         const apiData: { count: string; state: string }[] =
@@ -2037,7 +2325,7 @@ export default function UserAnalyticsDashboard() {
       }
     }
     fetchStateData();
-  }, [api_startpoint]);
+  }, [api_startpoint, globalFilters]);
 
   // Configure ECharts options
   const chartOptions = {
@@ -2049,7 +2337,7 @@ export default function UserAnalyticsDashboard() {
     },
     xAxis: {
       type: "category",
-      data: chartStudentsData.map((item) => item.code),
+      data: (chartStudentsData || []).map((item) => item.code),
       name: "States",
       axisLabel: {
         rotate: 45,
@@ -2078,7 +2366,7 @@ export default function UserAnalyticsDashboard() {
       {
         name: "Students",
         type: "bar",
-        data: chartStudentsData.map((item) => item.value),
+        data: (chartStudentsData || []).map((item) => item.value),
         itemStyle: {
           color: "#4a90e2",
         },
@@ -2099,6 +2387,8 @@ export default function UserAnalyticsDashboard() {
           `${api_startpoint}/api/demograph-teachers`,
           {
             method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(buildFilterParams()),
           }
         );
         const apiData: DemographData[] = await apiResponse.json();
@@ -2161,7 +2451,7 @@ export default function UserAnalyticsDashboard() {
     }
 
     fetchTeacherData();
-  }, [api_startpoint]);
+  }, [api_startpoint, globalFilters]);
 
   // ECharts configuration options
   const teacherDemographicOptions = {
@@ -2173,7 +2463,7 @@ export default function UserAnalyticsDashboard() {
     },
     xAxis: {
       type: "category",
-      data: chartTeacherData.map((item) => item.code),
+      data: (chartTeacherData || []).map((item) => item.code),
       name: "States",
       axisLabel: {
         rotate: 45,
@@ -2202,7 +2492,7 @@ export default function UserAnalyticsDashboard() {
       {
         name: "Teachers",
         type: "bar",
-        data: chartTeacherData.map((item) => item.value),
+        data: (chartTeacherData || []).map((item) => item.value),
         itemStyle: {
           color: "#4a90e2",
         },
@@ -2364,6 +2654,7 @@ export default function UserAnalyticsDashboard() {
                 selectedMissionSubject === "all"
                   ? null
                   : selectedMissionSubject,
+              ...buildFilterParams(),
             }),
           }
         );
@@ -2379,7 +2670,7 @@ export default function UserAnalyticsDashboard() {
     };
 
     fetchMissionData();
-  }, [missionGrouping, missionStatus, selectedMissionSubject]);
+  }, [missionGrouping, missionStatus, selectedMissionSubject, globalFilters]);
   // Robust parser for JSON text fields.
   const getParsedField = (raw: any): string => {
     if (typeof raw === "object" && raw !== null) {
@@ -2418,7 +2709,7 @@ export default function UserAnalyticsDashboard() {
   const periods = Object.keys(groupedByPeriod).sort();
   // Unique levels across data
   const uniqueLevels = Array.from(
-    new Set(missionData.map((item) => getParsedField(item.level_title)))
+    new Set((missionData || []).map((item) => getParsedField(item.level_title)))
   );
 
   // Build series data: for each unique level, for each period, use the count (or 0 if missing)
@@ -2492,14 +2783,14 @@ export default function UserAnalyticsDashboard() {
   };
 
   const missionDataTransformed = transformData(missionData);
-  const periodsMissionTransformed = missionDataTransformed.map(
+  const periodsMissionTransformed = (missionDataTransformed || []).map(
     (item) => item.period
   );
   const seriesMissionTransformed = uniqueLevels.map((level, idx) => ({
     name: level,
     type: "bar",
     stack: "total",
-    data: missionDataTransformed.map((item) => item[level] || 0),
+    data: (missionDataTransformed || []).map((item) => item[level] || 0),
     // Customize item color as desired.
     itemStyle: {
       color: ["#5470C6", "#91CC75", "#FAC858", "#EE6666", "#73C0DE", "#3BA272"][
@@ -2669,6 +2960,7 @@ export default function UserAnalyticsDashboard() {
                 selectedJigyasaSubject === "all"
                   ? null
                   : selectedJigyasaSubject,
+              ...buildFilterParams(),
             }),
           }
         );
@@ -2684,7 +2976,7 @@ export default function UserAnalyticsDashboard() {
     };
 
     fetchJigyasaData();
-  }, [jigyasaGrouping, jigyasaStatus, selectedJigyasaSubject]);
+  }, [jigyasaGrouping, jigyasaStatus, selectedJigyasaSubject, globalFilters]);
 
   const groupedByPeriodJigyasa: Record<string, Record<string, number>> = {};
   jigyasaData.forEach((item) => {
@@ -2703,7 +2995,7 @@ export default function UserAnalyticsDashboard() {
   const periodsJigyasa = Object.keys(groupedByPeriodJigyasa).sort();
   // Unique levels across data
   const uniqueLevelsJigyasa = Array.from(
-    new Set(jigyasaData.map((item) => getParsedField(item.level_title)))
+    new Set((jigyasaData || []).map((item) => getParsedField(item.level_title)))
   );
 
   const seriesJigyasa = uniqueLevelsJigyasa.map((level, idx) => ({
@@ -2751,14 +3043,14 @@ export default function UserAnalyticsDashboard() {
   };
 
   const jigyasaDataTransformed = transformData(jigyasaData);
-  const periodsJigyasaTransformed = jigyasaDataTransformed.map(
+  const periodsJigyasaTransformed = (jigyasaDataTransformed || []).map(
     (item) => item.period
   );
   const seriesJigyasaTransformed = uniqueLevelsJigyasa.map((level, idx) => ({
     name: level,
     type: "bar",
     stack: "total",
-    data: jigyasaDataTransformed.map((item) => item[level] || 0),
+    data: (jigyasaDataTransformed || []).map((item) => item[level] || 0),
     // Customize item color as desired.
     itemStyle: {
       color: ["#5470C6", "#91CC75", "#FAC858", "#EE6666", "#73C0DE", "#3BA272"][
@@ -2923,6 +3215,7 @@ export default function UserAnalyticsDashboard() {
               status: pragyaStatus,
               subject:
                 selectedPragyaSubject === "all" ? null : selectedPragyaSubject,
+              ...buildFilterParams(),
             }),
           }
         );
@@ -2938,7 +3231,7 @@ export default function UserAnalyticsDashboard() {
     };
 
     fetchPragyaData();
-  }, [pragyaGrouping, pragyaStatus, selectedPragyaSubject]);
+  }, [pragyaGrouping, pragyaStatus, selectedPragyaSubject, globalFilters]);
 
   const groupedByPeriodPragya: Record<string, Record<string, number>> = {};
   pragyaData.forEach((item) => {
@@ -2957,7 +3250,7 @@ export default function UserAnalyticsDashboard() {
   const periodsPragya = Object.keys(groupedByPeriodPragya).sort();
   // Unique levels across data
   const uniqueLevelsPragya = Array.from(
-    new Set(pragyaData.map((item) => getParsedField(item.level_title)))
+    new Set((pragyaData || []).map((item) => getParsedField(item.level_title)))
   );
 
   const seriesPragya = uniqueLevelsPragya.map((level, idx) => ({
@@ -3005,14 +3298,14 @@ export default function UserAnalyticsDashboard() {
   };
 
   const pragyaDataTransformed = transformData(pragyaData);
-  const periodsPragyaTransformed = pragyaDataTransformed.map(
+  const periodsPragyaTransformed = (pragyaDataTransformed || []).map(
     (item) => item.period
   );
   const seriesPragyaTransformed = uniqueLevelsPragya.map((level, idx) => ({
     name: level,
     type: "bar",
     stack: "total",
-    data: pragyaDataTransformed.map((item) => item[level] || 0),
+    data: (pragyaDataTransformed || []).map((item) => item[level] || 0),
     // Customize item color as desired.
     itemStyle: {
       color: ["#5470C6", "#91CC75", "#FAC858", "#EE6666", "#73C0DE", "#3BA272"][
@@ -3248,7 +3541,7 @@ export default function UserAnalyticsDashboard() {
   const periodsQuiz = Object.keys(groupedByPeriodQuiz).sort();
   // Unique levels for legend and series
   const uniqueLevelsQuiz = Array.from(
-    new Set(quizData.map((item) => getParsedField(item.level_title)))
+    new Set((quizData || []).map((item) => getParsedField(item.level_title)))
   );
 
   // Build series data: one series per level (stacked bar)
@@ -5185,16 +5478,18 @@ export default function UserAnalyticsDashboard() {
   // Fetch stats whenever filters change
   useEffect(() => {
     setVisionLoading(true);
-    const filterParams = buildFilterParams();
-    const params = new URLSearchParams({
+    const requestBody = {
+      ...buildFilterParams(),
       grouping: groupingVision,
       assigned_by: assignedBy !== "all" ? assignedBy : undefined,
       subject_id: subjectId ? subjectId.toString() : undefined,
-    } as any);
+    };
 
-    fetch(
-      `${api_startpoint}/api/vision-completion-stats?${params}&${filterParams}`
-    )
+    fetch(`${api_startpoint}/api/vision-completion-stats`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestBody),
+    })
       .then((res) => res.json())
       .then((json) => {
         setStatsVision(json.data);
@@ -5206,23 +5501,23 @@ export default function UserAnalyticsDashboard() {
       });
   }, [groupingVision, subjectId, assignedBy, globalFilters]);
 
-  const periodsVision = statsVision.map((d) => d.period);
+  const periodsVision = (statsVision || []).map((d) => d.period);
   const levelsVision = Array.from(
-    new Set(statsVision.flatMap((d) => d.levels.map((l) => l.level)))
+    new Set((statsVision || []).flatMap((d) => d.levels.map((l) => l.level)))
   );
   // series per level
   const seriesVision: any[] = levelsVision.map((level) => ({
     name: level,
     type: "bar",
     stack: "total",
-    data: statsVision.map((d) => {
+    data: (statsVision || []).map((d) => {
       const lvl = d.levels.find((l) => l.level === level);
       return lvl ? lvl.count : 0;
     }),
   }));
 
   // compute totals per period
-  const totalsVision = statsVision.map((d) =>
+  const totalsVision = (statsVision || []).map((d) =>
     d.levels.reduce((sum, lvl) => sum + lvl.count, 0)
   );
 
@@ -5246,7 +5541,8 @@ export default function UserAnalyticsDashboard() {
     axisPointer: { type: "shadow" },
     formatter: (params: any[]) => {
       const idx = params[0].dataIndex;
-      const pd = statsVision[idx];
+      const pd = (statsVision || [])[idx];
+      if (!pd) return "";
       let txt = `${pd.period}<br/>`;
       pd.levels.forEach((lvl) => {
         txt += `<b>${lvl.level} :</b> ${lvl.count}<br/>`;
@@ -5334,6 +5630,7 @@ export default function UserAnalyticsDashboard() {
         setTotalVisionSubmitted(json.total_vision_answers);
       });
   }, []);
+
   return (
     <div className={`page bg-light ${inter.className} font-sans`}>
       {/* Fixed Sidebar */}
