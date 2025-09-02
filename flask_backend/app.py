@@ -179,6 +179,7 @@ def upload_media(file):
 ###################################################################################
 ###################################################################################
 
+
 def build_filter_conditions(request_args=None):
     """Build SQL WHERE conditions and parameters based on global filters"""
     if request_args is None:
@@ -206,7 +207,7 @@ def build_filter_conditions(request_args=None):
         params.append(school_code.strip())
     
     # User type filter
-    user_type = request_args.get('userType')
+    user_type = request_args.get('user_type')
     if user_type and user_type != 'All':
         if user_type == 'Student':
             conditions.append("u.type = 3")
@@ -628,15 +629,37 @@ def get_approval_rate():
     finally:
         connection.close()
 
-@app.route('/api/coupons-used-count', methods=['GET'])
+@app.route('/api/coupons-used-count', methods=['GET', 'POST'])
 def get_coupons_used_count():
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
+            # Get filter parameters
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            elif request.method == 'GET':
+                filters = dict(request.args)
+            
             sql = """
-            select -amount as amount, count(*) as coupon_count from lifeapp.coin_transactions group by coinable_type,amount having amount < 0 order by amount asc ;
+                SELECT -ct.amount as amount, count(*) as coupon_count 
+                FROM lifeapp.coin_transactions ct
+                INNER JOIN lifeapp.users u ON u.id = ct.user_id
+                WHERE ct.amount < 0
             """
-            cursor.execute(sql)
+            params = []
+            
+            # Add filters
+            where_clause, filter_params = build_filter_conditions(filters)
+            if where_clause and where_clause != "1=1":
+                # Adapt table aliases to our query (s. -> u. for schools, since user is already joined)
+                where_clause = where_clause.replace('s.', 'u.')
+                sql += f" AND {where_clause}"
+                params.extend(filter_params)
+            
+            sql += " GROUP BY ct.coinable_type, ct.amount ORDER BY ct.amount ASC"
+            
+            cursor.execute(sql, params)
             result = cursor.fetchall()
             print("Query Result:", result)  # Debugging statement
         return jsonify(result)
@@ -645,16 +668,37 @@ def get_coupons_used_count():
     finally:
         connection.close()
 
-@app.route('/api/teacher-assign-count', methods= ['GET'])
+@app.route('/api/teacher-assign-count', methods=['GET', 'POST'])
 def get_teacher_assign_count():
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            #execute sql query
+            # Get filter parameters
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            elif request.method == 'GET':
+                filters = dict(request.args)
+            
             sql = """
-            select teacher_id, count(*) as assign_count from lifeapp.la_mission_assigns group by teacher_id;
+                SELECT ma.teacher_id, count(*) as assign_count 
+                FROM lifeapp.la_mission_assigns ma
+                INNER JOIN lifeapp.users u ON u.id = ma.teacher_id
+                WHERE 1=1
             """
-            cursor.execute(sql)
+            params = []
+            
+            # Add filters
+            where_clause, filter_params = build_filter_conditions(filters)
+            if where_clause and where_clause != "1=1":
+                # Adapt table aliases to our query
+                where_clause = where_clause.replace('s.', 'u.')
+                sql += f" AND {where_clause}"
+                params.extend(filter_params)
+            
+            sql += " GROUP BY ma.teacher_id"
+            
+            cursor.execute(sql, params)
             result = cursor.fetchall()
         return jsonify(result)
     except Exception as e:
@@ -710,8 +754,10 @@ def get_count_school_rate():
             
             sql += " group by state order by count_state desc"
             
-            # If no specific state filter, limit to top 5
-            if not (filters.get('state') and filters['state'] != 'All'):
+            # Only apply limit if this is for chart display (not dropdown)
+            # Check if this is a dropdown request by looking for a specific parameter
+            is_dropdown_request = filters.get('for_dropdown', False)
+            if not (filters.get('state') and filters['state'] != 'All') and not is_dropdown_request:
                 sql += " limit 5"
             
             cursor.execute(sql, params)
@@ -774,11 +820,11 @@ def get_school_code_list():
             
             # Build base query to get school codes from schools table
             sql = """
-                SELECT DISTINCT school_code 
+                SELECT DISTINCT code as school_code 
                 FROM lifeapp.schools 
-                WHERE school_code IS NOT NULL 
-                AND school_code != '' 
-                AND school_code != 'null'
+                WHERE code IS NOT NULL 
+                AND code != '' 
+                AND code != 'null'
             """
             params = []
             
@@ -792,7 +838,7 @@ def get_school_code_list():
                 sql += " AND city = %s"
                 params.append(filters['city'])
             
-            sql += " ORDER BY school_code ASC"
+            sql += " ORDER BY code ASC"
             
             cursor.execute(sql, params)
             result = cursor.fetchall()
@@ -806,28 +852,47 @@ def get_school_code_list():
     finally:
         connection.close()
 
-@app.route('/api/user-type-chart',methods = ['GET'])
+@app.route('/api/user-type-chart', methods=['GET', 'POST'])
 def get_user_type_fetch():
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
+            # Get filter parameters
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            elif request.method == 'GET':
+                filters = dict(request.args)
+            
             # Execute the SQL query
             sql = """
-                select count(*) as count,
-                case 
-                when type = 1
-                    then 'Admin'
-                when type = 3
-                    then 'Student'
-                when type = 5
-                    then 'Teacher'
-                when type = 4
-                    then 'Mentor'
-                else 'Default'
-                end as
-                userType from lifeapp.users group by type;
+                SELECT count(*) as count,
+                CASE 
+                    WHEN u.type = 1 THEN 'Admin'
+                    WHEN u.type = 3 THEN 'Student'
+                    WHEN u.type = 5 THEN 'Teacher'
+                    WHEN u.type = 4 THEN 'Mentor'
+                    ELSE 'Unspecified'
+                END AS userType 
+                FROM lifeapp.users u
+                WHERE 1=1
             """
-            cursor.execute(sql)
+            params = []
+            
+            # Add filters
+            where_clause, filter_params = build_filter_conditions(filters)
+            if where_clause and where_clause != "1=1":
+                # Adapt table aliases to our query - join with schools table if needed
+                if 's.' in where_clause:
+                    # Add schools join if school-related filters are present
+                    sql = sql.replace('FROM lifeapp.users u', 
+                                    'FROM lifeapp.users u LEFT JOIN lifeapp.schools s ON u.school_id = s.id')
+                sql += f" AND {where_clause}"
+                params.extend(filter_params)
+            
+            sql += " GROUP BY u.type"
+            
+            cursor.execute(sql, params)
             result = cursor.fetchall()
         return jsonify(result)
     except Exception as e:
@@ -837,77 +902,54 @@ def get_user_type_fetch():
 
 @app.route('/api/students-by-grade-over-time', methods=['POST'])
 def get_students_by_grade_over_time():
-    req = request.get_json()
+    req = request.get_json() or {}
     grouping = req.get('grouping', 'monthly')
     
     # Choose the appropriate time expression for grouping
     if grouping == 'daily':
-        period_expr = "DATE(created_at)"
+        period_expr = "DATE(u.created_at)"
     elif grouping == 'weekly':
-        period_expr = "CONCAT(YEAR(created_at), '-', LPAD(WEEK(created_at, 3), 2, '0'))"
+        period_expr = "CONCAT(YEAR(u.created_at), '-', LPAD(WEEK(u.created_at, 3), 2, '0'))"
     elif grouping == 'monthly':
-        period_expr = "DATE_FORMAT(created_at, '%Y-%m')"
+        period_expr = "DATE_FORMAT(u.created_at, '%%Y-%%m')"
     elif grouping == 'quarterly':
-        period_expr = "CONCAT(YEAR(created_at), '-Q', QUARTER(created_at))"
+        period_expr = "CONCAT(YEAR(u.created_at), '-Q', QUARTER(u.created_at))"
     elif grouping == 'yearly':
-        period_expr = "YEAR(created_at)"
+        period_expr = "YEAR(u.created_at)"
     elif grouping == 'lifetime':
         period_expr = "'Lifetime'"
     else:
-        period_expr = "DATE_FORMAT(created_at, '%Y-%m')"
+        period_expr = "DATE_FORMAT(u.created_at, '%%Y-%%m')"
 
-    # Build base query with filters
-    sql = f"""
-        SELECT {period_expr} AS period, 
-               IFNULL(grade, 'Unspecified') AS grade,
-               COUNT(*) AS count
-        FROM lifeapp.users 
-        WHERE `type` = 3
-    """
-    params = []
-    
-    # Add state filter
-    if req.get('state') and req['state'] != 'All':
-        sql += " AND state = %s"
-        params.append(req['state'])
-    
-    # Add city filter
-    if req.get('city') and req['city'] != 'All':
-        sql += " AND city = %s"
-        params.append(req['city'])
-    
-    # Add school code filter
-    if req.get('school_code') and req['school_code'] != 'All':
-        sql += " AND school_code = %s"
-        params.append(req['school_code'])
-    
-    # Add grade filter
-    if req.get('grade') and req['grade'] != 'All':
-        grade_num = req['grade'].replace('Grade ', '')
-        if grade_num.isdigit():
-            sql += " AND grade = %s"
-            params.append(int(grade_num))
-    
-    # Add date range filter
-    if req.get('date_range') and req['date_range'] != 'All':
-        date_filter = req['date_range']
-        if date_filter == 'last7days':
-            sql += " AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
-        elif date_filter == 'last30days':
-            sql += " AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
-        elif date_filter == 'last3months':
-            sql += " AND created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
-        elif date_filter == 'last6months':
-            sql += " AND created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
-        elif date_filter == 'lastyear':
-            sql += " AND created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
-    
-    sql += " GROUP BY period, grade ORDER BY period, grade"
-    
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute(sql, params)
+            # Build filter conditions
+            filter_conditions, filter_params = build_filter_conditions(req)
+            
+            # Join with schools for location-based filtering
+            join_clause = ""
+            if any(key in req for key in ['state', 'city', 'school_code']):
+                join_clause = "JOIN lifeapp.schools s ON u.school_code = s.code"
+            
+            # Build WHERE clause properly
+            where_conditions = "u.`type` = 3"
+            if filter_conditions and filter_conditions != "1=1":
+                where_conditions += f" AND {filter_conditions}"
+            
+            # Build base query with filters
+            sql = f"""
+                SELECT {period_expr} AS period, 
+                       IFNULL(u.grade, 'Unspecified') AS grade,
+                       COUNT(*) AS count
+                FROM lifeapp.users u
+                {join_clause}
+                WHERE {where_conditions}
+                GROUP BY period, grade 
+                ORDER BY period, grade
+            """
+            
+            cursor.execute(sql, filter_params)
             result = cursor.fetchall()  
         return jsonify(result), 200
     except Exception as e:
@@ -983,84 +1025,61 @@ def get_total_student_count():
     
 @app.route('/api/teachers-by-grade-over-time', methods=['POST'])
 def get_teachers_by_grade_over_time():
-    req = request.get_json()
+    req = request.get_json() or {}
     grouping = req.get('grouping', 'monthly')
     
-    # Set the time period expression based on the grouping option.
+    # Choose the appropriate time expression for grouping
     if grouping == 'daily':
-        period_expr = "DATE(ltg.created_at)"
+        period_expr = "DATE(u.created_at)"
     elif grouping == 'weekly':
-        period_expr = "CONCAT(YEAR(ltg.created_at), '-', LPAD(WEEK(ltg.created_at, 3), 2, '0'))"
+        period_expr = "CONCAT(YEAR(u.created_at), '-', LPAD(WEEK(u.created_at, 3), 2, '0'))"
     elif grouping == 'monthly':
-        period_expr = "DATE_FORMAT(ltg.created_at, '%Y-%m')"
+        period_expr = "DATE_FORMAT(u.created_at, '%%Y-%%m')"
     elif grouping == 'quarterly':
-        period_expr = "CONCAT(YEAR(ltg.created_at), '-Q', QUARTER(ltg.created_at))"
+        period_expr = "CONCAT(YEAR(u.created_at), '-Q', QUARTER(u.created_at))"
     elif grouping == 'yearly':
-        period_expr = "YEAR(ltg.created_at)"
+        period_expr = "YEAR(u.created_at)"
     elif grouping == 'lifetime':
         period_expr = "'Lifetime'"
     else:
-        period_expr = "DATE_FORMAT(ltg.created_at, '%Y-%m')"
+        period_expr = "DATE_FORMAT(u.created_at, '%%Y-%%m')"
 
-    # Build base query with user joins for filtering
-    sql = f"""
-        SELECT {period_expr} AS period,
-               ltg.la_grade_id AS grade,
-               COUNT(DISTINCT ltg.user_id) AS count
-        FROM lifeapp.la_teacher_grades ltg
-        INNER JOIN lifeapp.users u ON u.id = ltg.user_id
-        WHERE 1=1
-    """
-    params = []
-    
-    # Add state filter
-    if req.get('state') and req['state'] != 'All':
-        sql += " AND u.state = %s"
-        params.append(req['state'])
-    
-    # Add city filter
-    if req.get('city') and req['city'] != 'All':
-        sql += " AND u.city = %s"
-        params.append(req['city'])
-    
-    # Add school code filter
-    if req.get('school_code') and req['school_code'] != 'All':
-        sql += " AND u.school_code = %s"
-        params.append(req['school_code'])
-    
-    # Add grade filter
-    if req.get('grade') and req['grade'] != 'All':
-        grade_num = req['grade'].replace('Grade ', '')
-        if grade_num.isdigit():
-            sql += " AND ltg.la_grade_id = %s"
-            params.append(int(grade_num))
-    
-    # Add date range filter
-    if req.get('date_range') and req['date_range'] != 'All':
-        date_filter = req['date_range']
-        if date_filter == 'last7days':
-            sql += " AND ltg.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
-        elif date_filter == 'last30days':
-            sql += " AND ltg.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
-        elif date_filter == 'last3months':
-            sql += " AND ltg.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
-        elif date_filter == 'last6months':
-            sql += " AND ltg.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
-        elif date_filter == 'lastyear':
-            sql += " AND ltg.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
-    
-    sql += " GROUP BY period, grade ORDER BY period, grade"
-    
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute(sql, params)
+            # Build filter conditions
+            filter_conditions, filter_params = build_filter_conditions(req)
+            
+            # Join with schools for location-based filtering
+            join_clause = ""
+            if any(key in req for key in ['state', 'city', 'school_code']):
+                join_clause = "JOIN lifeapp.schools s ON u.school_code = s.code"
+            
+            # Build WHERE clause properly
+            where_conditions = "u.`type` = 5"
+            if filter_conditions and filter_conditions != "1=1":
+                where_conditions += f" AND {filter_conditions}"
+            
+            # Build base query with filters
+            sql = f"""
+                SELECT {period_expr} AS period, 
+                       IFNULL(u.grade, 'Unspecified') AS grade,
+                       COUNT(*) AS count
+                FROM lifeapp.users u
+                {join_clause}
+                WHERE {where_conditions}
+                GROUP BY period, grade 
+                ORDER BY period, grade
+            """
+            
+            cursor.execute(sql, filter_params)
             result = cursor.fetchall()  
-        return jsonify(result), 200
+            return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
-        connection.close()
+        if 'connection' in locals():
+            connection.close()
 
 @app.route('/api/teacher-count', methods = ['POST'])
 def get_teacher_count():
@@ -1141,27 +1160,34 @@ def get_demograph_students():
     Ensures unique state entries and consistent naming.
     """
     try:
+        data = request.get_json() or {}
+        
         connection = get_db_connection()
         with connection.cursor() as cursor:
+            # Build filter conditions
+            filter_conditions, filter_params = build_filter_conditions(data)
+            
+            # Join with schools for location-based filtering
+            join_clause = ""
+            if any(key in data for key in ['state', 'city', 'school_code']):
+                join_clause = "JOIN lifeapp.schools s ON u.school_code = s.code"
+            
             # Normalize state names and aggregate counts
-            sql = """
+            sql = f"""
             SELECT 
                 CASE 
-                    WHEN state IN ('Gujrat', 'Gujarat') THEN 'Gujarat'
-                    WHEN state IN ('Tamilnadu', 'Tamil Nadu') THEN 'Tamil Nadu'
-                    ELSE state 
+                    WHEN u.state IN ('Gujrat', 'Gujarat') THEN 'Gujarat'
+                    WHEN u.state IN ('Tamilnadu', 'Tamil Nadu') THEN 'Tamil Nadu'
+                    ELSE u.state 
                 END AS normalized_state,
-                SUM(count) as total_count
-            FROM (
-                SELECT state, COUNT(*) as count 
-                FROM lifeapp.users 
-                WHERE `type` = 3 AND state != 2 
-                GROUP BY state
-            ) AS subquery
+                COUNT(*) as total_count
+            FROM lifeapp.users u
+            {join_clause}
+            WHERE u.`type` = 3 AND u.state IS NOT NULL AND u.state != '' AND u.state != '2' {' AND ' + filter_conditions if filter_conditions and filter_conditions != '1=1' else ''}
             GROUP BY normalized_state
             ORDER BY total_count DESC
             """
-            cursor.execute(sql)
+            cursor.execute(sql, filter_params)
             result = cursor.fetchall()
             
             # Convert to list of dictionaries with consistent keys
@@ -1180,27 +1206,36 @@ def get_demograph_students():
 @app.route('/api/demograph-teachers' , methods = ['POST'])
 def get_teacher_demograph():
     try:
+        data = request.get_json() or {}
+        print(f"DEBUG: Received data for teacher demograph: {data}")
+        
         connection = get_db_connection()
         with connection.cursor() as cursor:
+            # Build filter conditions
+            filter_conditions, filter_params = build_filter_conditions(data)
+            print(f"DEBUG: Filter conditions: {filter_conditions}, params: {filter_params}")
+            
+            # Join with schools for location-based filtering
+            join_clause = ""
+            if any(key in data for key in ['state', 'city', 'school_code']):
+                join_clause = "JOIN lifeapp.schools s ON u.school_code = s.code"
+            
             # Normalize state names and aggregate counts
-            sql = """
+            sql = f"""
             SELECT 
                 CASE 
-                    WHEN state IN ('Gujrat', 'Gujarat') THEN 'Gujarat'
-                    WHEN state IN ('Tamilnadu', 'Tamil Nadu') THEN 'Tamil Nadu'
-                    ELSE state 
+                    WHEN u.state IN ('Gujrat', 'Gujarat') THEN 'Gujarat'
+                    WHEN u.state IN ('Tamilnadu', 'Tamil Nadu') THEN 'Tamil Nadu'
+                    ELSE u.state 
                 END AS normalized_state,
-                SUM(count) as total_count
-            FROM (
-                SELECT state, COUNT(*) as count 
-                FROM lifeapp.users 
-                WHERE `type` = 5 AND state != 2 
-                GROUP BY state
-            ) AS subquery
+                COUNT(*) as total_count
+            FROM lifeapp.users u
+            {join_clause}
+            WHERE u.`type` = 5 AND u.state IS NOT NULL AND u.state != '' AND u.state != '2' {' AND ' + filter_conditions if filter_conditions and filter_conditions != '1=1' else ''}
             GROUP BY normalized_state
             ORDER BY total_count DESC
             """
-            cursor.execute(sql)
+            cursor.execute(sql, filter_params)
             result = cursor.fetchall()
             
             # Convert to list of dictionaries with consistent keys
@@ -1774,6 +1809,38 @@ def get_all_states():
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+
+@app.route('/api/all-states-dropdown', methods=['GET'])
+def get_all_states_dropdown():
+    """
+    Returns all unique states from both users and schools tables for dropdown population.
+    This endpoint is specifically designed for frontend dropdowns and returns all available states.
+    """
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            sql = """
+                SELECT DISTINCT state 
+                FROM (
+                    SELECT DISTINCT state FROM lifeapp.users 
+                    WHERE state IS NOT NULL AND state != '' AND state != '2' AND state != 'null'
+                    UNION
+                    SELECT DISTINCT state FROM lifeapp.schools 
+                    WHERE state IS NOT NULL AND state != '' AND state != '2' AND state != 'null'
+                ) AS combined_states
+                ORDER BY state;
+            """
+            cursor.execute(sql)
+            result = cursor.fetchall()
+            
+            # Extract state names into a simple list
+            states = [row['state'] for row in result if row['state']]
+            
+        return jsonify(states)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
 
 @app.route('/api/demograph-students-2', methods=['POST'])
 def get_demograph_students_2():
@@ -2417,15 +2484,16 @@ def get_PBLsubmissions():
 
     return jsonify(data=results)
 
-@app.route('/api/PBLsubmissions/total', methods=['GET'])
+@app.route('/api/PBLsubmissions/total', methods=['GET', 'POST'])
 def get_total_PBLsubmissions():
-    # Returns the total count for a given status (default 'all')
-    # status = request.args.get('status', 'all')
-    # if status not in STATUS_CONDITIONS:
-    #     return jsonify(error='Invalid status'), 400
-
-    # status_where = STATUS_CONDITIONS[status]
-    sql = f"""
+    # Get filter parameters
+    filters = {}
+    if request.method == 'POST':
+        filters = request.get_json() or {}
+    elif request.method == 'GET':
+        filters = dict(request.args)
+    
+    sql = """
     SELECT
         COUNT(*) AS total
     FROM lifeapp.la_mission_assigns lama
@@ -2434,13 +2502,25 @@ def get_total_PBLsubmissions():
     INNER JOIN lifeapp.la_mission_completes lamc
         ON lama.user_id = lamc.user_id
         AND lama.la_mission_id = lamc.la_mission_id
-    WHERE lam.allow_for = 2;
+    INNER JOIN lifeapp.users u ON u.id = lama.user_id
+    WHERE lam.allow_for = 2
     """
+    params = []
+    
+    # Add global filters
+    where_clause, filter_params = build_filter_conditions(filters)
+    if where_clause and where_clause != "1=1":
+        # Join with schools table if school-related filters are present
+        if 's.' in where_clause:
+            sql = sql.replace('INNER JOIN lifeapp.users u ON u.id = lama.user_id', 
+                            'INNER JOIN lifeapp.users u ON u.id = lama.user_id LEFT JOIN lifeapp.schools s ON u.school_id = s.id')
+        sql += f" AND {where_clause}"
+        params.extend(filter_params)
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            cursor.execute(sql)
+            cursor.execute(sql, params)
             result = cursor.fetchone()
             total = result.get('total', 0) if result else 0
     finally:
@@ -2448,12 +2528,20 @@ def get_total_PBLsubmissions():
 
     return jsonify(total=total)
     
-@app.route('/api/vision-completion-stats', methods=['GET'])
+@app.route('/api/vision-completion-stats', methods=['GET', 'POST'])
 def vision_completion_stats():
-    # Query params
-    grouping    = request.args.get('grouping', 'daily')
-    subject_id  = request.args.get('subject_id', type=int)
-    assigned_by = request.args.get('assigned_by')  # 'teacher' or 'self'
+    # Get filter parameters
+    filters = {}
+    if request.method == 'POST':
+        filters = request.get_json() or {}
+        grouping = filters.get('grouping', 'daily')
+        subject_id = filters.get('subject_id')
+        assigned_by = filters.get('assigned_by')  # 'teacher' or 'self'
+    else:
+        filters = dict(request.args)
+        grouping = request.args.get('grouping', 'daily')
+        subject_id = request.args.get('subject_id', type=int)
+        assigned_by = request.args.get('assigned_by')  # 'teacher' or 'self'
 
     # Map grouping to SQL
     fmt_map = {
@@ -2480,6 +2568,7 @@ def vision_completion_stats():
             JOIN visions v      ON v.id = a.vision_id
             JOIN la_levels l    ON l.id = v.la_level_id
             JOIN la_subjects s  ON s.id = v.la_subject_id
+            JOIN users u        ON u.id = a.user_id
             LEFT JOIN vision_assigns vs
               ON vs.vision_id = a.vision_id AND vs.student_id = a.user_id
             WHERE 1=1
@@ -2492,6 +2581,16 @@ def vision_completion_stats():
                 sql += " AND vs.teacher_id IS NOT NULL"
             elif assigned_by == 'self':
                 sql += " AND vs.teacher_id IS NULL"
+            
+            # Add global filters
+            where_clause, filter_params = build_filter_conditions(filters)
+            if where_clause and where_clause != "1=1":
+                # Join with schools table if school-related filters are present
+                if 's.' in where_clause:
+                    sql = sql.replace('JOIN users u        ON u.id = a.user_id', 
+                                    'JOIN users u        ON u.id = a.user_id LEFT JOIN schools s ON u.school_id = s.id')
+                sql += f" AND {where_clause}"
+                params.extend(filter_params)
 
             sql += " GROUP BY period, l.title, s.title ORDER BY period"
             cursor.execute(sql, params)
@@ -2530,10 +2629,16 @@ def vision_completion_stats():
     finally:
         conn.close()
 
-@app.route('/api/vision-score-stats', methods=['GET'])
+@app.route('/api/vision-score-stats', methods=['GET', 'POST'])
 def vision_score_stats():
-    # Query params
-    grouping = request.args.get('grouping', 'daily')  # daily, weekly, monthly, quarterly, yearly, lifetime
+    # Get filter parameters
+    filters = {}
+    if request.method == 'POST':
+        filters = request.get_json() or {}
+        grouping = filters.get('grouping', 'daily')
+    else:
+        filters = dict(request.args)
+        grouping = request.args.get('grouping', 'daily')
 
     # Map grouping to SQL
     fmt_map = {
@@ -2554,11 +2659,24 @@ def vision_score_stats():
               {period_expr} AS period,
               COALESCE(SUM(a.score), 0) AS total_score
             FROM vision_question_answers a
+            JOIN users u ON u.id = a.user_id
             WHERE a.score IS NOT NULL
-            GROUP BY period
-            ORDER BY period
             """
-            cursor.execute(sql)
+            params = []
+            
+            # Add global filters
+            where_clause, filter_params = build_filter_conditions(filters)
+            if where_clause and where_clause != "1=1":
+                # Join with schools table if school-related filters are present
+                if 's.' in where_clause:
+                    sql = sql.replace('JOIN users u ON u.id = a.user_id', 
+                                    'JOIN users u ON u.id = a.user_id LEFT JOIN schools s ON u.school_id = s.id')
+                sql += f" AND {where_clause}"
+                params.extend(filter_params)
+            
+            sql += " GROUP BY period ORDER BY period"
+            
+            cursor.execute(sql, params)
             rows = cursor.fetchall()
 
         data = [{'period': r['period'], 'total_score': r['total_score']} for r in rows]
@@ -2618,7 +2736,8 @@ def vision_teacher_completions_summary():
 
     finally:
         conn.close()
-       
+         
+
 ###################################################################################
 ###################################################################################
 ######################## STUDENT/ DASHBOARD APIs ##################################
@@ -3698,7 +3817,7 @@ def mission_search():
     from_date = filters.get('from_date')
     to_date = filters.get('to_date')
     page = int(filters.get('page', 1))
-    per_page = int(filters.get('per_page', 50))
+    per_page = int(filters.get('per_page', 15))  # Changed default from 50 to 15 for better pagination
     offset = (page - 1) * per_page
 
     print(f"🔎 Filters received: {filters}")
@@ -3815,6 +3934,7 @@ def mission_search():
                 r['media_url'] = f"{base_url}/{r['media_path']}" if r.get('media_path') else None
             print(f" Rows fetched: {len(rows)}")
 
+        # Return paginated response with proper pagination metadata
         return jsonify({
             'data': rows,
             'pagination': {
@@ -4000,6 +4120,7 @@ def update_mission_status():
     finally:
         conn.close()
         print("🔚 Connection closed")
+
         
 ###################################################################################
 ###################################################################################
