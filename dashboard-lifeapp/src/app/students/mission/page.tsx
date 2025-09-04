@@ -1,7 +1,7 @@
 "use client";
 import "@tabler/core/dist/css/tabler.min.css";
 // import 'bootstrap/dist/css/bootstrap.min.css';
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import React from "react";
 import { Inter } from "next/font/google";
 const inter = Inter({ subsets: ["latin"] });
@@ -14,6 +14,8 @@ import {
   IconX,
   IconCircleCheck,
   IconCircleX,
+  IconChevronLeft,
+  IconChevronRight,
 } from "@tabler/icons-react";
 import {
   BarChart3,
@@ -24,10 +26,60 @@ import {
   XCircle,
 } from "lucide-react";
 
-// const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
+// const api_startpoint = 'https://lifeapp-api-vv1.vercel.app    '
 // const api_startpoint = "http://localhost:5000";
 const api_startpoint = "http://152.42.239.141:5000";
 
+// Add CSS styles for the new features
+const tableStyles = `
+  <style>
+    .table-container {
+      position: relative;
+    }
+    
+    .scroll-hint-left, .scroll-hint-right {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(111, 66, 193, 0.9);
+      color: white;
+      padding: 12px 16px;
+      border-radius: 10%;
+      cursor: pointer;
+      z-index: 5;
+      transition: opacity 0.3s;
+      border: none;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    }
+    
+    .scroll-hint-left {
+      left: 15px;
+    }
+    
+    .scroll-hint-right {
+      right: 15px;
+    }
+    
+    .scroll-hint-hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    
+    /* Sticky table header */
+    .table-sticky-header thead th {
+      position: sticky;
+      top: 0;
+      background: #f8f9fa;
+      z-index: 1;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    /* Smooth scrolling */
+    .smooth-scroll {
+      scroll-behavior: smooth;
+    }
+  </style>
+`;
 
 export default function MissionPage() {
   const [selectedFromDate, setSelectedFromDate] = useState(""); // New state for From Date
@@ -39,7 +91,8 @@ export default function MissionPage() {
   const [totalPages, setTotalPages] = useState<number>(0);
   const [totalRows, setTotalRows] = useState(0);
   const [currentPage, setCurrentPage] = useState<number>(0);
-  const rowsPerPage = 50;
+  // Changed from 50 to 15 rows per page for better pagination
+  const rowsPerPage = 25;
   const [isTableLoading, setIsTableLoading] = useState(false);
   // Add two new state variables for the school ID and mobile no filters
   const [inputCode, setInputCode] = useState("");
@@ -56,7 +109,12 @@ export default function MissionPage() {
     message: "",
   });
 
-  // Handler for search button
+  // Refs for table scrolling functionality
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const [showLeftHint, setShowLeftHint] = useState(false);
+  const [showRightHint, setShowRightHint] = useState(true);
+
+  // Handler for search button - handles pagination with proper page indexing
   const handleSearch = async (pageIndex: number) => {
     const filters = {
       mission_acceptance: selectedMissionAcceptance,
@@ -66,8 +124,8 @@ export default function MissionPage() {
       school_code:
         selectedSchoolCode.length > 0 ? selectedSchoolCode : undefined, // new filter
       mobile_no: selectedMobileNo, // new filter
-      page: pageIndex + 1,
-      per_page: rowsPerPage,
+      page: pageIndex + 1, // Backend expects 1-based indexing
+      per_page: rowsPerPage, // Use 15 rows per page instead of 50
     };
 
     setIsTableLoading(true); // Set loading to true when search starts
@@ -92,7 +150,12 @@ export default function MissionPage() {
       setTableData(result.data);
       setTotalPages(result.pagination.total_pages);
       setTotalRows(result.pagination.total);
-      setCurrentPage(pageIndex);
+      setCurrentPage(pageIndex); // Keep 0-based indexing for frontend
+
+      // Reset scroll hints when new data loads
+      setTimeout(() => {
+        updateScrollHints();
+      }, 100);
     } catch (error) {
       console.error("Search error:", error);
       setTotalRows(0);
@@ -101,12 +164,45 @@ export default function MissionPage() {
       setIsTableLoading(false); // Set loading to false when search completes (success or error)
     }
   };
+
+  // Update scroll hints based on current scroll position
+  const updateScrollHints = () => {
+    const container = tableContainerRef.current;
+    if (container) {
+      const { scrollLeft, scrollWidth, clientWidth } = container;
+      setShowLeftHint(scrollLeft > 10);
+      setShowRightHint(scrollLeft < scrollWidth - clientWidth - 10);
+    }
+  };
+
+  // Handle scroll events to show/hide scroll hints
+  const handleTableScroll = () => {
+    updateScrollHints();
+  };
+
+  // Scroll table horizontally with larger increments and smooth behavior
+  const scrollTableHorizontally = (direction: "left" | "right") => {
+    if (tableContainerRef.current) {
+      const container = tableContainerRef.current;
+      const scrollAmount = container.clientWidth * 0.8; // Scroll 80% of viewport width
+
+      container.scrollTo({
+        left:
+          direction === "left"
+            ? container.scrollLeft - scrollAmount
+            : container.scrollLeft + scrollAmount,
+        behavior: "smooth",
+      });
+
+      // Update hints after scroll
+      setTimeout(updateScrollHints, 300);
+    }
+  };
+
   useEffect(() => {
     // Initial fetch to load the first page of data
     handleSearch(0);
   }, []);
-  // Determine paginated data
-  // const paginatedData = tableData.slice(currentPage * rowsPerPage, (currentPage + 1) * rowsPerPage);
 
   const handleClear = () => {
     setSelectedMissionAcceptance("");
@@ -216,6 +312,9 @@ export default function MissionPage() {
 
   return (
     <div className={`page bg-light ${inter.className} font-sans`}>
+      {/* Inject CSS styles */}
+      <div dangerouslySetInnerHTML={{ __html: tableStyles }} />
+
       <Sidebar />
       <div className="page-wrapper" style={{ marginLeft: "250px" }}>
         <div className="page-body">
@@ -353,7 +452,7 @@ export default function MissionPage() {
 
             {/* Paginated Results Table */}
             <div className="card shadow-sm border-0 mt-2">
-              <div className="card-body overflow-x-scroll">
+              <div className="card-body">
                 <h5 className="card-title mb-4">
                   Results- {totalRows} Students found
                 </h5>
@@ -381,154 +480,193 @@ export default function MissionPage() {
                     </div>
                   </div>
                 ) : (
-                  <>
-                    <table className="table table-striped">
-                      <thead>
-                        <tr>
-                          <th>Row ID</th>
-                          <th>Mission ID</th>
-                          <th>Student Name</th>
-                          <th>School Code</th>
-                          <th>School Name</th>
-                          <th>Mission Title</th>
-                          <th>Media</th>
-                          <th>Assigned By</th>
-                          <th>Status</th>
-                          {selectedMissionAcceptance === "Requested" && (
-                            <th>Action</th>
-                          )}
-                          <th>Student ID</th>
-                          <th>Requested At</th>
-                          <th>Total Points</th>
-                          <th>Each Mission Timing</th>
-                          <th>Mobile No</th>
-                          <th>DOB</th>
-                          <th>Grade</th>
-                          <th>City</th>
-                          <th>State</th>
-                          <th>Address</th>
-                          <th>Earn Coins</th>
-                          <th>Heart Coins</th>
-                          <th>Brain Coins</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {tableData.map((row, index) => {
-                          let MissionTitle = "";
-                          try {
-                            const parsedTitle = JSON.parse(row.Mission_Title);
-                            MissionTitle = parsedTitle.en || "";
-                          } catch (error) {
-                            MissionTitle = row.Mission_Title;
-                          }
-                          return (
-                            <tr key={index}>
-                              <td>{row.Row_ID}</td>
-                              <td>{row.Mission_ID}</td>
-                              <td>{row.Student_Name}</td>
-                              <td>{row.school_code}</td>
-                              <td>{row.School_Name}</td>
-                              <td>{MissionTitle}</td>
-                              <td>
-                                {row.media_url?.match(/\.(jpe?g|png|gif)$/i) ? (
-                                  <img
-                                    src={row.media_url}
-                                    className="w-12 h-12 object-cover cursor-pointer"
-                                    onClick={() =>
-                                      setLightboxUrl(row.media_url!)
-                                    }
-                                  />
-                                ) : row.media_url ? (
-                                  <button
-                                    className="btn btn-link"
-                                    onClick={() =>
-                                      window.open(row.media_url, "_blank")
-                                    }
-                                  >
-                                    📄 File
-                                  </button>
-                                ) : (
-                                  "—"
-                                )}
-                              </td>
-                              <td>{row.Assigned_By}</td>
-                              <td>{row.Status}</td>
-                              {selectedMissionAcceptance === "Requested" && (
+                  <div className="table-container">
+                    {/* Scroll hints for visual indication - larger buttons with significant scroll */}
+                    <button
+                      className={`scroll-hint-left ${
+                        !showLeftHint ? "scroll-hint-hidden" : ""
+                      }`}
+                      onClick={() => scrollTableHorizontally("left")}
+                      aria-label="Scroll left"
+                    >
+                      <IconChevronLeft size={24} />
+                    </button>
+                    <button
+                      className={`scroll-hint-right ${
+                        !showRightHint ? "scroll-hint-hidden" : ""
+                      }`}
+                      onClick={() => scrollTableHorizontally("right")}
+                      aria-label="Scroll right"
+                    >
+                      <IconChevronRight size={24} />
+                    </button>
+
+                    {/* Table with sticky headers and smooth scrolling */}
+                    <div
+                      ref={tableContainerRef}
+                      className="overflow-x-scroll smooth-scroll"
+                      onScroll={handleTableScroll}
+                      style={{ maxHeight: "70vh", overflowY: "auto" }}
+                    >
+                      <table className="table table-striped table-sticky-header">
+                        <thead>
+                          <tr>
+                            <th>Row ID</th>
+                            <th>Mission ID</th>
+                            <th>Student Name</th>
+                            <th>School Code</th>
+                            <th>School Name</th>
+                            <th>Mission Title</th>
+                            <th>Media</th>
+                            <th>Assigned By</th>
+                            <th>Status</th>
+                            {selectedMissionAcceptance === "Requested" && (
+                              <th>Action</th>
+                            )}
+                            <th>Student ID</th>
+                            <th>Requested At</th>
+                            <th>Total Points</th>
+                            <th>Each Mission Timing</th>
+                            <th>Mobile No</th>
+                            <th>DOB</th>
+                            <th>Grade</th>
+                            <th>City</th>
+                            <th>State</th>
+                            <th>Address</th>
+                            <th>Earn Coins</th>
+                            <th>Heart Coins</th>
+                            <th>Brain Coins</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tableData.map((row, index) => {
+                            let MissionTitle = "";
+                            try {
+                              const parsedTitle = JSON.parse(row.Mission_Title);
+                              MissionTitle = parsedTitle.en || "";
+                            } catch (error) {
+                              MissionTitle = row.Mission_Title;
+                            }
+                            return (
+                              <tr key={index}>
+                                <td>{row.Row_ID}</td>
+                                <td>{row.Mission_ID}</td>
+                                <td>{row.Student_Name}</td>
+                                <td>{row.school_code}</td>
+                                <td>{row.School_Name}</td>
+                                <td>{MissionTitle}</td>
                                 <td>
-                                  {row.Status === "Requested" && (
-                                    <div className="d-flex gap-2">
-                                      <button
-                                        className="btn btn-sm btn-success"
-                                        onClick={() =>
-                                          handleStatusUpdate(
-                                            row.Row_ID,
-                                            row.Mission_ID,
-                                            row.Student_ID,
-                                            "approve"
-                                          )
-                                        }
-                                      >
-                                        Approve
-                                      </button>
-                                      <button
-                                        className="btn btn-sm btn-danger"
-                                        onClick={() =>
-                                          handleStatusUpdate(
-                                            row.Row_ID,
-                                            row.Mission_ID,
-                                            row.Student_ID,
-                                            "reject"
-                                          )
-                                        }
-                                      >
-                                        Reject
-                                      </button>
-                                    </div>
+                                  {row.media_url?.match(
+                                    /\.(jpe?g|png|gif)$/i
+                                  ) ? (
+                                    <img
+                                      src={row.media_url}
+                                      className="w-12 h-12 object-cover cursor-pointer"
+                                      onClick={() =>
+                                        setLightboxUrl(row.media_url!)
+                                      }
+                                    />
+                                  ) : row.media_url ? (
+                                    <button
+                                      className="btn btn-link"
+                                      onClick={() =>
+                                        window.open(row.media_url, "_blank")
+                                      }
+                                    >
+                                      📄 File
+                                    </button>
+                                  ) : (
+                                    "—"
                                   )}
                                 </td>
-                              )}
-                              <td>{row.Student_ID}</td>
-                              <td>{row.Requested_At}</td>
-                              <td>{row.Total_Points}</td>
-                              <td>{row.Each_Mission_Timing}</td>
-                              <td>{row.mobile_no}</td>
-                              <td>{row.dob}</td>
-                              <td>{row.grade}</td>
-                              <td>{row.city}</td>
-                              <td>{row.state}</td>
-                              <td>{row.address}</td>
-                              <td>{row.earn_coins}</td>
-                              <td>{row.heart_coins}</td>
-                              <td>{row.brain_coins}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                                <td>{row.Assigned_By}</td>
+                                <td>{row.Status}</td>
+                                {selectedMissionAcceptance === "Requested" && (
+                                  <td>
+                                    {row.Status === "Requested" && (
+                                      <div className="d-flex gap-2">
+                                        <button
+                                          className="btn btn-sm btn-success"
+                                          onClick={() =>
+                                            handleStatusUpdate(
+                                              row.Row_ID,
+                                              row.Mission_ID,
+                                              row.Student_ID,
+                                              "approve"
+                                            )
+                                          }
+                                        >
+                                          Approve
+                                        </button>
+                                        <button
+                                          className="btn btn-sm btn-danger"
+                                          onClick={() =>
+                                            handleStatusUpdate(
+                                              row.Row_ID,
+                                              row.Mission_ID,
+                                              row.Student_ID,
+                                              "reject"
+                                            )
+                                          }
+                                        >
+                                          Reject
+                                        </button>
+                                      </div>
+                                    )}
+                                  </td>
+                                )}
+                                <td>{row.Student_ID}</td>
+                                <td>{row.Requested_At}</td>
+                                <td>{row.Total_Points}</td>
+                                <td>{row.Each_Mission_Timing}</td>
+                                <td>{row.mobile_no}</td>
+                                <td>{row.dob}</td>
+                                <td>{row.grade}</td>
+                                <td>{row.city}</td>
+                                <td>{row.state}</td>
+                                <td>{row.address}</td>
+                                <td>{row.earn_coins}</td>
+                                <td>{row.heart_coins}</td>
+                                <td>{row.brain_coins}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
 
-                    {/* Pagination Controls */}
-                    <div className="d-flex justify-content-between mt-3">
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => handleSearch(currentPage - 1)}
-                        disabled={currentPage === 0}
-                      >
-                        Previous
-                      </button>
-                      <div className="d-flex align-items-center">
+                    {/* Pagination Controls - Updated with better display and proper page handling */}
+                    <div className="d-flex justify-content-between align-items-center mt-3">
+                      <div>
+                        Showing{" "}
+                        {tableData.length > 0
+                          ? currentPage * rowsPerPage + 1
+                          : 0}{" "}
+                        to{" "}
+                        {Math.min((currentPage + 1) * rowsPerPage, totalRows)}{" "}
+                        of {totalRows} entries
+                      </div>
+                      <div className="d-flex align-items-center gap-2">
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => handleSearch(currentPage - 1)}
+                          disabled={currentPage === 0}
+                        >
+                          Previous
+                        </button>
                         <span className="mx-2">
                           Page {currentPage + 1} of {totalPages || 1}
                         </span>
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => handleSearch(currentPage + 1)}
+                          disabled={currentPage + 1 >= totalPages}
+                        >
+                          Next
+                        </button>
                       </div>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => handleSearch(currentPage + 1)}
-                        disabled={currentPage + 1 >= totalPages}
-                      >
-                        Next
-                      </button>
                     </div>
-                  </>
+                  </div>
                 )}
               </div>
 
