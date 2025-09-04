@@ -2436,8 +2436,8 @@ def get_PBLsubmissions():
     # Mapping of grouping keys to SQL expressions
     GROUPING_SQL = {
         'daily':     "DATE(lamc.created_at)",
-        'weekly':    "DATE_FORMAT(lamc.created_at, '%x-%v')",
-        'monthly':   "DATE_FORMAT(lamc.created_at, '%Y-%m')",
+        'weekly':    "DATE_FORMAT(lamc.created_at, '%%x-%%v')",
+        'monthly':   "DATE_FORMAT(lamc.created_at, '%%Y-%%m')",
         'quarterly': "CONCAT(YEAR(lamc.created_at), '-Q', QUARTER(lamc.created_at))",
         'yearly':    "YEAR(lamc.created_at)",
         'lifetime':  "'All Time'"
@@ -2546,8 +2546,8 @@ def vision_completion_stats():
     # Map grouping to SQL
     fmt_map = {
         'daily':     "DATE(a.created_at)",
-        'weekly':    "DATE_FORMAT(a.created_at, '%x-%v')",
-        'monthly':   "DATE_FORMAT(a.created_at, '%Y-%m')",
+        'weekly':    "DATE_FORMAT(a.created_at, '%%x-%%v')",
+        'monthly':   "DATE_FORMAT(a.created_at, '%%Y-%%m')",
         'quarterly': "CONCAT(YEAR(a.created_at), '-Q', QUARTER(a.created_at))",
         'yearly':    "YEAR(a.created_at)",
         'lifetime':  "'lifetime'"
@@ -2643,8 +2643,8 @@ def vision_score_stats():
     # Map grouping to SQL
     fmt_map = {
         'daily':     "DATE(a.created_at)",
-        'weekly':    "DATE_FORMAT(a.created_at, '%x-%v')",
-        'monthly':   "DATE_FORMAT(a.created_at, '%Y-%m')",
+        'weekly':    "DATE_FORMAT(a.created_at, '%%x-%%v')",
+        'monthly':   "DATE_FORMAT(a.created_at, '%%Y-%%m')",
         'quarterly': "CONCAT(YEAR(a.created_at), '-Q', QUARTER(a.created_at))",
         'yearly':    "YEAR(a.created_at)",
         'lifetime':  "'lifetime'"
