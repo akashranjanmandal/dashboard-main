@@ -1,17 +1,66 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Inter } from "next/font/google";
 import "@tabler/core/dist/css/tabler.min.css";
 import { Sidebar } from "@/components/ui/sidebar";
 import { Download, Search, XCircle, Eye, Play } from "lucide-react";
-import { IconCircleCheck, IconCircleX } from "@tabler/icons-react";
-
+import {
+  IconCircleCheck,
+  IconCircleX,
+  IconChevronLeft,
+  IconChevronRight,
+} from "@tabler/icons-react";
 const inter = Inter({ subsets: ["latin"] });
 
 const api_startpoint = "http://152.42.239.141:5000";
 // const api_startpoint = "http://localhost:5000";
 
-// Interfaces for type safety (same as before)
+// Add CSS styles for the new features
+const tableStyles = `
+  <style>
+    .table-container {
+      position: relative;
+    }
+    .scroll-hint-left, .scroll-hint-right {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(111, 66, 193, 0.9);
+      color: white;
+      padding: 12px 16px;
+      border-radius: 10%; /* Changed from 50% to 10% as requested */
+      cursor: pointer;
+      z-index: 5;
+      transition: opacity 0.3s;
+      border: none;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    }
+    .scroll-hint-left {
+      left: 15px;
+    }
+    .scroll-hint-right {
+      right: 15px;
+    }
+    .scroll-hint-hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    /* Sticky table header */
+    .table-sticky-header thead th {
+      position: sticky;
+      top: 0;
+      background: #f8f9fa;
+      z-index: 1;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    /* Smooth scrolling */
+    .smooth-scroll {
+      scroll-behavior: smooth;
+    }
+  </style>
+`;
+
+// Interfaces for type safety 
 interface SessionRow {
   [key: string]: any;
   answer_id: number | null;
@@ -33,7 +82,6 @@ interface SessionRow {
   user_id?: number;
   representative_answer_id?: number;
 }
-
 interface VisionDetails {
   vision_id: number;
   title: string;
@@ -46,7 +94,6 @@ interface VisionDetails {
   index: number;
   questions: QuestionDetails[];
 }
-
 interface QuestionDetails {
   question_id: number;
   question_type: string;
@@ -54,7 +101,6 @@ interface QuestionDetails {
   options: { [key: string]: string } | null;
   correct_answer: string | null;
 }
-
 interface MCQAnswer {
   answer_id: number;
   question_id: number;
@@ -70,7 +116,7 @@ interface MCQAnswer {
 export default function VisionSessionsPage() {
   const [rows, setRows] = useState<SessionRow[]>([]);
   const [page, setPage] = useState(1);
-  const [perPage] = useState(25);
+  const [perPage] = useState(15);
   const [qtype, setQtype] = useState("");
   const [assignedBy, setAssignedBy] = useState("");
   const [dateStart, setDateStart] = useState("");
@@ -80,19 +126,16 @@ export default function VisionSessionsPage() {
   const [inputCode, setInputCode] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [selectedSchoolCode, setSelectedSchoolCode] = useState<string[]>([]);
-
   const [confirmationModal, setConfirmationModal] = useState({
     show: false,
     type: "",
     message: "",
   });
-
   const [visionDetailsModal, setVisionDetailsModal] = useState({
     show: false,
     details: null as VisionDetails | null,
     loading: false,
   });
-
   const [mcqAnswersModal, setMcqAnswersModal] = useState({
     show: false,
     answers: [] as MCQAnswer[],
@@ -100,6 +143,43 @@ export default function VisionSessionsPage() {
     visionTitle: "",
     userName: "",
   });
+
+  // Refs for table scrolling functionality
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const [showLeftHint, setShowLeftHint] = useState(false);
+  const [showRightHint, setShowRightHint] = useState(true);
+
+  // Update scroll hints based on current scroll position
+  const updateScrollHints = () => {
+    const container = tableContainerRef.current;
+    if (container) {
+      const { scrollLeft, scrollWidth, clientWidth } = container;
+      setShowLeftHint(scrollLeft > 10);
+      setShowRightHint(scrollLeft < scrollWidth - clientWidth - 10);
+    }
+  };
+
+  // Handle scroll events to show/hide scroll hints
+  const handleTableScroll = () => {
+    updateScrollHints();
+  };
+
+  // Scroll table horizontally with larger increments and smooth behavior
+  const scrollTableHorizontally = (direction: "left" | "right") => {
+    if (tableContainerRef.current) {
+      const container = tableContainerRef.current;
+      const scrollAmount = container.clientWidth * 0.8; // Scroll 80% of viewport width
+      container.scrollTo({
+        left:
+          direction === "left"
+            ? container.scrollLeft - scrollAmount
+            : container.scrollLeft + scrollAmount,
+        behavior: "smooth",
+      });
+      // Update hints after scroll
+      setTimeout(updateScrollHints, 300);
+    }
+  };
 
   const fetchSessions = async () => {
     setLoading(true);
@@ -112,7 +192,6 @@ export default function VisionSessionsPage() {
     if (dateEnd) params.set("date_end", dateEnd);
     if (filterStatus) params.set("status", filterStatus);
     selectedSchoolCode.forEach((code) => params.append("school_codes", code));
-
     try {
       const res = await fetch(
         `${api_startpoint}/api/vision_sessions?${params}`
@@ -120,6 +199,11 @@ export default function VisionSessionsPage() {
       const result = await res.json();
       const sessions = Array.isArray(result.data) ? result.data : [];
       setRows(sessions);
+
+      // Reset scroll hints when new data loads
+      setTimeout(() => {
+        updateScrollHints();
+      }, 100);
     } catch (error) {
       console.error("Error fetching sessions:", error);
       alert("Failed to load sessions.");
@@ -127,7 +211,6 @@ export default function VisionSessionsPage() {
       setLoading(false);
     }
   };
-
   useEffect(() => {
     fetchSessions();
   }, [
@@ -139,12 +222,10 @@ export default function VisionSessionsPage() {
     dateEnd,
     selectedSchoolCode,
   ]);
-
   const handleSearch = () => {
     setPage(1);
     fetchSessions();
   };
-
   const handleClear = () => {
     setQtype("");
     setAssignedBy("");
@@ -155,7 +236,6 @@ export default function VisionSessionsPage() {
     setPage(1);
     fetchSessions();
   };
-
   const handleScoreBlur = async (id: number, value: string) => {
     const newScore = Number(value);
     if (!isNaN(newScore)) {
@@ -172,7 +252,6 @@ export default function VisionSessionsPage() {
       }
     }
   };
-
   const showVisionDetails = async (visionId: number) => {
     setVisionDetailsModal({ show: true, details: null, loading: true });
     try {
@@ -188,7 +267,6 @@ export default function VisionSessionsPage() {
       setVisionDetailsModal({ show: false, details: null, loading: false });
     }
   };
-
   const showMcqAnswers = async (
     visionId: number,
     userId: number,
@@ -227,11 +305,9 @@ export default function VisionSessionsPage() {
       });
     }
   };
-
   const closeVisionDetailsModal = () => {
     setVisionDetailsModal({ show: false, details: null, loading: false });
   };
-
   const closeMcqAnswersModal = () => {
     setMcqAnswersModal({
       show: false,
@@ -241,7 +317,6 @@ export default function VisionSessionsPage() {
       userName: "",
     });
   };
-
   const exportToCSV = () => {
     if (rows.length === 0) {
       alert("No data to export. Please perform a search first.");
@@ -280,9 +355,10 @@ export default function VisionSessionsPage() {
       alert("An error occurred while exporting data. Please try again.");
     }
   };
-
   return (
     <div className={`page bg-body ${inter.className} font-sans`}>
+      {/* Inject CSS styles */}
+      <div dangerouslySetInnerHTML={{ __html: tableStyles }} />
       <Sidebar />
       <div className="page-wrapper" style={{ marginLeft: "250px" }}>
         <div className="page-body">
@@ -402,7 +478,6 @@ export default function VisionSessionsPage() {
                 </div>
               </div>
             </div>
-
             {/* Export Button */}
             <div className="d-flex flex-wrap gap-2">
               <button
@@ -414,249 +489,274 @@ export default function VisionSessionsPage() {
                 Export
               </button>
             </div>
-
             {/* Sessions Table - Improved Styling */}
             {loading ? (
               <div className="w-8 h-8 border-t-2 border-sky-700 animate-spin rounded-full mx-auto my-4"></div>
             ) : (
-              <div className="table-responsive">
-                {/* Added table-bordered for vertical/horizontal lines, table-sm for slightly smaller padding, border for outline */}
-                <table className="table table-vcenter card-table table-striped table-bordered table-sm border">
-                  <thead className="table-light">
-                    <tr>
-                      <th className="text-nowrap">Vision</th>
-                      {/* Increased width for Question column */}
-                      <th
-                        className="text-nowrap"
-                        style={{ minWidth: "400px", width: "40%" }}
-                      >
-                        Question
-                      </th>
-                      <th className="text-nowrap">User</th>
-                      <th className="text-nowrap">Assigned By</th>
-                      <th className="text-nowrap">Answer Text</th>
-                      <th className="text-nowrap">Answer Option</th>
-                      <th className="text-nowrap">Image Answer</th>
-                      <th className="text-nowrap">YouTube Link</th>
-                      <th className="text-nowrap">Show Details</th>
-                      <th className="text-nowrap">Total Points</th>
-                      <th className="text-nowrap">Status</th>
-                      {filterStatus === "requested" && (
-                        <th className="text-nowrap">Actions</th>
-                      )}
-                      <th className="text-nowrap">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((r) => (
-                      <tr
-                        key={`${r.answer_id || r.representative_answer_id}-${
-                          r.user_id || 0
-                        }`}
-                      >
-                        <td className="align-middle">{r.vision_title}</td>
-                        {/* Question column with wider space */}
-                        <td
-                          className="align-middle"
-                          style={{ minWidth: "300px", width: "30%" }}
+              <div className="table-container">
+                {/* Scroll hints for visual indication - larger buttons with significant scroll */}
+                <button
+                  className={`scroll-hint-left ${
+                    !showLeftHint ? "scroll-hint-hidden" : ""
+                  }`}
+                  onClick={() => scrollTableHorizontally("left")}
+                  aria-label="Scroll left"
+                >
+                  <IconChevronLeft size={24} />
+                </button>
+                <button
+                  className={`scroll-hint-right ${
+                    !showRightHint ? "scroll-hint-hidden" : ""
+                  }`}
+                  onClick={() => scrollTableHorizontally("right")}
+                  aria-label="Scroll right"
+                >
+                  <IconChevronRight size={24} />
+                </button>
+
+                {/* Table with sticky headers and smooth scrolling */}
+                <div
+                  ref={tableContainerRef}
+                  className="overflow-x-scroll smooth-scroll rounded-lg shadow"
+                  onScroll={handleTableScroll}
+                  style={{ maxHeight: "70vh", overflowY: "auto" }}
+                >
+                  <table className="table table-vcenter card-table w-full table-auto min-w-full bg-white border border-gray-200 table-sticky-header">
+                    <thead className="table-light">
+                      <tr>
+                        <th className="text-nowrap">Vision</th>
+                        {/* Increased width for Question column */}
+                        <th
+                          className="text-nowrap"
+                          style={{ minWidth: "400px", width: "40%" }}
                         >
-                          {r.question_title}
-                        </td>
-                        <td className="align-middle">{r.user_name}</td>
-                        <td className="align-middle">{r.teacher_name}</td>
-                        <td className="align-middle">
-                          {r.answer_type === "text" ? r.answer_text : ""}
-                        </td>
-                        <td className="align-middle">
-                          {r.answer_type === "mcq" ? (
+                          Question
+                        </th>
+                        <th className="text-nowrap">User</th>
+                        <th className="text-nowrap">Assigned By</th>
+                        <th className="text-nowrap">Answer Text</th>
+                        <th className="text-nowrap">Answer Option</th>
+                        <th className="text-nowrap">Image Answer</th>
+                        <th className="text-nowrap">YouTube Link</th>
+                        <th className="text-nowrap">Show Details</th>
+                        <th className="text-nowrap">Total Points</th>
+                        <th className="text-nowrap">Status</th>
+                        {filterStatus === "requested" && (
+                          <th className="text-nowrap">Actions</th>
+                        )}
+                        <th className="text-nowrap">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r) => (
+                        <tr
+                          key={`${r.answer_id || r.representative_answer_id}-${
+                            r.user_id || 0
+                          }`}
+                        >
+                          <td className="align-middle">{r.vision_title}</td>
+                          {/* Question column with wider space */}
+                          <td
+                            className="align-middle"
+                            style={{ minWidth: "300px", width: "30%" }}
+                          >
+                            {r.question_title}
+                          </td>
+                          <td className="align-middle">{r.user_name}</td>
+                          <td className="align-middle">{r.teacher_name}</td>
+                          <td className="align-middle">
+                            {r.answer_type === "text" ? r.answer_text : ""}
+                          </td>
+                          <td className="align-middle">
+                            {r.answer_type === "mcq" ? (
+                              <button
+                                className="btn btn-sm btn-outline-primary"
+                                onClick={() =>
+                                  showMcqAnswers(
+                                    r.vision_id,
+                                    r.user_id!,
+                                    r.vision_title,
+                                    r.user_name
+                                  )
+                                }
+                              >
+                                See MCQ Answers
+                              </button>
+                            ) : (
+                              r.answer_option
+                            )}
+                          </td>
+                          <td className="align-middle">
+                            {r.answer_type === "image" && r.media_url && (
+                              <img
+                                src={r.media_url}
+                                alt="Answer"
+                                className="img-thumbnail cursor-pointer"
+                                style={{ maxHeight: "50px", maxWidth: "50px" }}
+                                onClick={() => setLightboxUrl(r.media_url!)}
+                              />
+                            )}
+                          </td>
+                          <td className="align-middle">
+                            {r.vision_youtube_url ? (
+                              <a
+                                href={r.vision_youtube_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-primary"
+                              >
+                                Video Link
+                              </a>
+                            ) : (
+                              "N/A"
+                            )}
+                          </td>
+                          <td className="align-middle text-center">
+                            {" "}
+                            {/* Centered button */}
                             <button
-                              className="btn btn-sm btn-outline-primary"
-                              onClick={() =>
-                                showMcqAnswers(
-                                  r.vision_id,
-                                  r.user_id!,
-                                  r.vision_title,
-                                  r.user_name
+                              className="btn btn-sm btn-icon btn-outline-secondary"
+                              onClick={() => showVisionDetails(r.vision_id)}
+                              title="Show Vision Details"
+                            >
+                              <Eye size={16} />
+                            </button>
+                          </td>
+                          <td className="align-middle">
+                            <input
+                              type="number"
+                              defaultValue={r.score ?? ""}
+                              onBlur={(e) =>
+                                handleScoreBlur(
+                                  r.answer_id || r.representative_answer_id!,
+                                  e.target.value
                                 )
                               }
-                            >
-                              See MCQ Answers
-                            </button>
-                          ) : (
-                            r.answer_option
-                          )}
-                        </td>
-                        <td className="align-middle">
-                          {r.answer_type === "image" && r.media_url && (
-                            <img
-                              src={r.media_url}
-                              alt="Answer"
-                              className="img-thumbnail cursor-pointer"
-                              style={{ maxHeight: "50px", maxWidth: "50px" }}
-                              onClick={() => setLightboxUrl(r.media_url!)}
+                              className="form-control form-control-sm w-100"
+                              style={{ maxWidth: "80px" }}
+                              disabled={r.answer_type === "mcq"}
                             />
-                          )}
-                        </td>
-                        <td className="align-middle">
-                          {r.vision_youtube_url ? (
-                            <a
-                              href={r.vision_youtube_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-primary"
-                            >
-                              Video Link
-                            </a>
-                          ) : (
-                            "N/A"
-                          )}
-                        </td>
-                        <td className="align-middle text-center">
-                          {" "}
-                          {/* Centered button */}
-                          <button
-                            className="btn btn-sm btn-icon btn-outline-secondary"
-                            onClick={() => showVisionDetails(r.vision_id)}
-                            title="Show Vision Details"
-                          >
-                            <Eye size={16} />
-                          </button>
-                        </td>
-                        <td className="align-middle">
-                          <input
-                            type="number"
-                            defaultValue={r.score ?? ""}
-                            onBlur={(e) =>
-                              handleScoreBlur(
-                                r.answer_id || r.representative_answer_id!,
-                                e.target.value
-                              )
-                            }
-                            className="form-control form-control-sm w-100"
-                            style={{ maxWidth: "80px" }}
-                            disabled={r.answer_type === "mcq"}
-                          />
-                        </td>
-                        <td className="align-middle">
-                          <span
-                            className={`badge ${
-                              r.status === "approved"
-                                ? "bg-success"
-                                : r.status === "rejected"
-                                ? "bg-danger"
-                                : r.status === "requested"
-                                ? "bg-warning"
-                                : "bg-secondary"
-                            }`}
-                          >
-                            {r.status}
-                          </span>
-                        </td>
-                        {filterStatus === "requested" && (
-                          <td className="align-middle">
-                            <div
-                              className="btn-group btn-group-sm"
-                              role="group"
-                            >
-                              <button
-                                className="btn btn-success"
-                                onClick={async () => {
-                                  const targetId =
-                                    r.answer_id || r.representative_answer_id;
-                                  if (!targetId) return;
-                                  try {
-                                    await fetch(
-                                      `${api_startpoint}/api/vision_sessions/${targetId}/status`,
-                                      {
-                                        method: "PUT",
-                                        headers: {
-                                          "Content-Type": "application/json",
-                                        },
-                                        body: JSON.stringify({
-                                          status: "approved",
-                                        }),
-                                      }
-                                    );
-                                    await fetch(
-                                      `${api_startpoint}/api/vision_sessions/${targetId}/score`,
-                                      {
-                                        method: "PUT",
-                                        headers: {
-                                          "Content-Type": "application/json",
-                                        },
-                                        body: JSON.stringify({ points: 10 }),
-                                      }
-                                    );
-                                    fetchSessions();
-                                    setConfirmationModal({
-                                      show: true,
-                                      type: "approve",
-                                      message:
-                                        "Vision session approved successfully!",
-                                    });
-                                  } catch (error) {
-                                    console.error(
-                                      "Error approving session:",
-                                      error
-                                    );
-                                    alert("Failed to approve session.");
-                                  }
-                                }}
-                                disabled={r.answer_type === "mcq"}
-                              >
-                                Approve
-                              </button>
-                              <button
-                                className="btn btn-danger"
-                                onClick={async () => {
-                                  const targetId =
-                                    r.answer_id || r.representative_answer_id;
-                                  if (!targetId) return;
-                                  try {
-                                    await fetch(
-                                      `${api_startpoint}/api/vision_sessions/${targetId}/status`,
-                                      {
-                                        method: "PUT",
-                                        headers: {
-                                          "Content-Type": "application/json",
-                                        },
-                                        body: JSON.stringify({
-                                          status: "rejected",
-                                        }),
-                                      }
-                                    );
-                                    fetchSessions();
-                                    setConfirmationModal({
-                                      show: true,
-                                      type: "reject",
-                                      message:
-                                        "Vision session rejected successfully!",
-                                    });
-                                  } catch (error) {
-                                    console.error(
-                                      "Error rejecting session:",
-                                      error
-                                    );
-                                    alert("Failed to reject session.");
-                                  }
-                                }}
-                                disabled={r.answer_type === "mcq"}
-                              >
-                                Reject
-                              </button>
-                            </div>
                           </td>
-                        )}
-                        <td className="align-middle text-nowrap">
-                          {new Date(r.created_at).toLocaleDateString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          <td className="align-middle">
+                            <span
+                              className={`badge ${
+                                r.status === "approved"
+                                  ? "bg-success"
+                                  : r.status === "rejected"
+                                  ? "bg-danger"
+                                  : r.status === "requested"
+                                  ? "bg-warning"
+                                  : "bg-secondary"
+                              }`}
+                            >
+                              {r.status}
+                            </span>
+                          </td>
+                          {filterStatus === "requested" && (
+                            <td className="align-middle">
+                              <div
+                                className="btn-group btn-group-sm"
+                                role="group"
+                              >
+                                <button
+                                  className="btn btn-success"
+                                  onClick={async () => {
+                                    const targetId =
+                                      r.answer_id || r.representative_answer_id;
+                                    if (!targetId) return;
+                                    try {
+                                      await fetch(
+                                        `${api_startpoint}/api/vision_sessions/${targetId}/status`,
+                                        {
+                                          method: "PUT",
+                                          headers: {
+                                            "Content-Type": "application/json",
+                                          },
+                                          body: JSON.stringify({
+                                            status: "approved",
+                                          }),
+                                        }
+                                      );
+                                      await fetch(
+                                        `${api_startpoint}/api/vision_sessions/${targetId}/score`,
+                                        {
+                                          method: "PUT",
+                                          headers: {
+                                            "Content-Type": "application/json",
+                                          },
+                                          body: JSON.stringify({ points: 10 }),
+                                        }
+                                      );
+                                      fetchSessions();
+                                      setConfirmationModal({
+                                        show: true,
+                                        type: "approve",
+                                        message:
+                                          "Vision session approved successfully!",
+                                      });
+                                    } catch (error) {
+                                      console.error(
+                                        "Error approving session:",
+                                        error
+                                      );
+                                      alert("Failed to approve session.");
+                                    }
+                                  }}
+                                  disabled={r.answer_type === "mcq"}
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  className="btn btn-danger"
+                                  onClick={async () => {
+                                    const targetId =
+                                      r.answer_id || r.representative_answer_id;
+                                    if (!targetId) return;
+                                    try {
+                                      await fetch(
+                                        `${api_startpoint}/api/vision_sessions/${targetId}/status`,
+                                        {
+                                          method: "PUT",
+                                          headers: {
+                                            "Content-Type": "application/json",
+                                          },
+                                          body: JSON.stringify({
+                                            status: "rejected",
+                                          }),
+                                        }
+                                      );
+                                      fetchSessions();
+                                      setConfirmationModal({
+                                        show: true,
+                                        type: "reject",
+                                        message:
+                                          "Vision session rejected successfully!",
+                                      });
+                                    } catch (error) {
+                                      console.error(
+                                        "Error rejecting session:",
+                                        error
+                                      );
+                                      alert("Failed to reject session.");
+                                    }
+                                  }}
+                                  disabled={r.answer_type === "mcq"}
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            </td>
+                          )}
+                          <td className="align-middle text-nowrap">
+                            {new Date(r.created_at).toLocaleDateString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
-
             {/* Pagination Controls */}
             <div className="d-flex justify-content-between align-items-center p-3">
               <button
@@ -675,7 +775,6 @@ export default function VisionSessionsPage() {
                 Next
               </button>
             </div>
-
             {/* Lightbox Modal */}
             {lightboxUrl && (
               <div
@@ -710,7 +809,6 @@ export default function VisionSessionsPage() {
                 </div>
               </div>
             )}
-
             {/* Confirmation Modal */}
             {confirmationModal.show && (
               <div
@@ -788,7 +886,6 @@ export default function VisionSessionsPage() {
                 </div>
               </div>
             )}
-
             {/* Vision Details Modal - Larger Headers */}
             {visionDetailsModal.show && (
               <div
@@ -836,7 +933,6 @@ export default function VisionSessionsPage() {
                             </p>
                           </div>
                           <hr />
-
                           {/* Section: Description - Larger Header */}
                           <div className="mb-4">
                             <h4 className="fw-bold mb-2 text-primary fs-3">
@@ -847,7 +943,6 @@ export default function VisionSessionsPage() {
                             </p>
                           </div>
                           <hr />
-
                           {/* Section: YouTube Link - Larger Header */}
                           <div className="mb-4">
                             <h4 className="fw-bold mb-2 text-primary fs-3">
@@ -867,7 +962,6 @@ export default function VisionSessionsPage() {
                             )}
                           </div>
                           <hr />
-
                           {/* Section: Subject - Larger Header */}
                           <div className="mb-4">
                             <h4 className="fw-bold mb-2 text-primary fs-3">
@@ -878,7 +972,6 @@ export default function VisionSessionsPage() {
                             </p>
                           </div>
                           <hr />
-
                           {/* Section: Level - Larger Header */}
                           <div className="mb-4">
                             <h4 className="fw-bold mb-2 text-primary fs-3">
@@ -889,7 +982,6 @@ export default function VisionSessionsPage() {
                             </p>
                           </div>
                           <hr />
-
                           {/* Section: Questions - No Accordion */}
                           <div>
                             {/* Larger Header for Questions section */}
@@ -909,7 +1001,6 @@ export default function VisionSessionsPage() {
                                             </span>
                                             {q.question}
                                           </h6>
-
                                           {q.options && (
                                             <div className="mt-2">
                                               <p className="mb-1 fw-medium fs-4">
@@ -932,7 +1023,6 @@ export default function VisionSessionsPage() {
                                               </ul>
                                             </div>
                                           )}
-
                                           {q.correct_answer && (
                                             <div className="mt-2">
                                               <p className="mb-0 fw-bold text-success fs-4">
@@ -973,7 +1063,6 @@ export default function VisionSessionsPage() {
                 </div>
               </div>
             )}
-
             {/* MCQ Answers Modal - Removed Status Column */}
             {mcqAnswersModal.show && (
               <div
@@ -1019,7 +1108,7 @@ export default function VisionSessionsPage() {
                                 <th scope="col">Question</th>
                                 <th scope="col">Options</th>
                                 <th scope="col">Correct Answer</th>
-                                <th scope="col">Student&apos;s Answer</th>
+                                <th scope="col">Student's Answer</th>
                                 {/* Status column removed */}
                               </tr>
                             </thead>
@@ -1090,7 +1179,6 @@ export default function VisionSessionsPage() {
                 </div>
               </div>
             )}
-
             {/* Backdrop for modals */}
             {(lightboxUrl ||
               confirmationModal.show ||
