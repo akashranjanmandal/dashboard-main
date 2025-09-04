@@ -1,15 +1,66 @@
 "use client";
-import React, { useEffect, useState, ChangeEvent, FormEvent } from "react";
+import React, { useEffect, useState, useRef } from "react"; // Added useRef
 import { Inter } from "next/font/google";
 import "@tabler/core/dist/css/tabler.min.css";
 import { Sidebar } from "@/components/ui/sidebar";
 import NumberFlow from "@number-flow/react";
-import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
+import {
+  IconEdit,
+  IconPlus,
+  IconTrash,
+  IconChevronLeft,
+  IconChevronRight,
+} from "@tabler/icons-react"; // Added scroll icons
 import Papa from "papaparse";
 
 const inter = Inter({ subsets: ["latin"] });
 // const api_startpoint = "http://localhost:5000";
 const api_startpoint = "http://152.42.239.141:5000";
+
+// --- Inject CSS styles for the new features ---
+const tableStyles = `
+  <style>
+    .table-container {
+      position: relative;
+    }
+    .scroll-hint-left, .scroll-hint-right {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(111, 66, 193, 0.9); /* Purple color, adjust as needed */
+      color: white;
+      padding: 12px 16px;
+      border-radius: 10%; /* Changed from 50% to 10% as requested */
+      cursor: pointer;
+      z-index: 5;
+      transition: opacity 0.3s;
+      border: none;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    }
+    .scroll-hint-left {
+      left: 15px;
+    }
+    .scroll-hint-right {
+      right: 15px;
+    }
+    .scroll-hint-hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    /* Sticky table header */
+    .table-sticky-header thead th {
+      position: sticky;
+      top: 0;
+      background: #f8f9fa; /* Or match your table header background */
+      z-index: 1;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    /* Smooth scrolling */
+    .smooth-scroll {
+      scroll-behavior: smooth;
+    }
+  </style>
+`;
 
 interface ModalProps {
   mode: "add" | "edit";
@@ -510,11 +561,48 @@ export default function VisionsPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [visionToDelete, setVisionToDelete] = useState<VisionRow | null>(null);
 
+  // --- Refs for table scrolling functionality ---
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const [showLeftHint, setShowLeftHint] = useState(false);
+  const [showRightHint, setShowRightHint] = useState(true);
+
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
-  const perPage = 30;
+  const perPage = 25;
+
+  // --- Update scroll hints based on current scroll position ---
+  const updateScrollHints = () => {
+    const container = tableContainerRef.current;
+    if (container) {
+      const { scrollLeft, scrollWidth, clientWidth } = container;
+      setShowLeftHint(scrollLeft > 10);
+      setShowRightHint(scrollLeft < scrollWidth - clientWidth - 10);
+    }
+  };
+
+  // --- Handle scroll events to show/hide scroll hints ---
+  const handleTableScroll = () => {
+    updateScrollHints();
+  };
+
+  // --- Scroll table horizontally with larger increments and smooth behavior ---
+  const scrollTableHorizontally = (direction: "left" | "right") => {
+    if (tableContainerRef.current) {
+      const container = tableContainerRef.current;
+      const scrollAmount = container.clientWidth * 0.8; // Scroll 80% of viewport width
+      container.scrollTo({
+        left:
+          direction === "left"
+            ? container.scrollLeft - scrollAmount
+            : container.scrollLeft + scrollAmount,
+        behavior: "smooth",
+      });
+      // Update hints after scroll
+      setTimeout(updateScrollHints, 300);
+    }
+  };
 
   async function fetchVisions() {
     setLoading(true);
@@ -568,6 +656,11 @@ export default function VisionsPage() {
       setRows(visions);
       setTotalCount(total);
       setTotalPages(Math.ceil(total / perPage));
+
+      // --- Reset scroll hints when new data loads ---
+      setTimeout(() => {
+        updateScrollHints();
+      }, 100);
     } catch (error: any) {
       console.error("Fetch error:", error);
       alert(`Failed to load visions: ${error.message}`);
@@ -665,6 +758,8 @@ export default function VisionsPage() {
 
   return (
     <div className={`page bg-body ${inter.className} font-sans`}>
+      {/* Inject CSS styles */}
+      <div dangerouslySetInnerHTML={{ __html: tableStyles }} />
       <Sidebar />
       <div
         className="page-wrapper"
@@ -753,201 +848,233 @@ export default function VisionsPage() {
               </div>
             ) : (
               <>
-                <div className="overflow-x-auto bg-white rounded-lg shadow">
-                  <table className="w-full table-auto">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[60px]">
-                          Serial No.
-                        </th>
-                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">
-                          Title
-                        </th>
-                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[300px] max-w-[300px]">
-                          Description
-                        </th>
-                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[150px]">
-                          YouTube
-                        </th>
-                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
-                          Allow For
-                        </th>
-                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[150px]">
-                          Subject
-                        </th>
-                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[150px]">
-                          Level
-                        </th>
-                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
-                          Status
-                        </th>
-                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
-                          Details
-                        </th>
-                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[80px]">
-                          Index
-                        </th>
-                        <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {rows.length > 0 ? (
-                        rows.map((r, index) => (
-                          <React.Fragment key={r.vision_id}>
-                            <tr className="hover:bg-gray-50">
-                              <td className="p-3 text-sm min-w-[60px]">
-                                {(currentPage - 1) * perPage + index + 1}
-                              </td>
-                              <td className="p-3 text-sm min-w-[200px]">
-                                {r.title}
-                              </td>
-                              <td
-                                className="p-3 text-sm min-w-[300px] max-w-[300px] whitespace-normal break-words overflow-y-auto max-h-32"
-                                style={{ wordBreak: "break-word" }}
-                              >
-                                {r.description}
-                              </td>
-                              <td className="p-3 text-sm min-w-[150px]">
-                                {r.youtube_url ? (
-                                  <a
-                                    href={r.youtube_url}
-                                    target="_blank"
-                                    className="text-sky-600 hover:underline"
-                                  >
-                                    Link
-                                  </a>
-                                ) : (
-                                  "-"
-                                )}
-                              </td>
-                              <td className="p-3 text-sm min-w-[100px]">
-                                {r.allow_for === 1
-                                  ? "All"
-                                  : r.allow_for === 2
-                                  ? "Teacher"
-                                  : "Student"}
-                              </td>
-                              <td className="p-3 text-sm min-w-[150px]">
-                                {r.subject}
-                              </td>
-                              <td className="p-3 text-sm min-w-[150px]">
-                                {r.level}
-                              </td>
-                              <td className="p-3 text-sm min-w-[100px]">
-                                <span
-                                  className={`px-2 py-1 text-xs rounded-full ${
-                                    r.status === 1
-                                      ? "bg-green-100 text-green-800"
-                                      : "bg-red-100 text-red-800"
-                                  }`}
+                {/* --- Table container with scroll hints --- */}
+                <div className="table-container">
+                  {/* Scroll hints for visual indication - larger buttons with significant scroll */}
+                  <button
+                    className={`scroll-hint-left ${
+                      !showLeftHint ? "scroll-hint-hidden" : ""
+                    }`}
+                    onClick={() => scrollTableHorizontally("left")}
+                    aria-label="Scroll left"
+                  >
+                    <IconChevronLeft size={24} />
+                  </button>
+                  <button
+                    className={`scroll-hint-right ${
+                      !showRightHint ? "scroll-hint-hidden" : ""
+                    }`}
+                    onClick={() => scrollTableHorizontally("right")}
+                    aria-label="Scroll right"
+                  >
+                    <IconChevronRight size={24} />
+                  </button>
+                  {/* --- Table with sticky headers, smooth scrolling, and boxed view (shadow, rounded) --- */}
+                  <div
+                    ref={tableContainerRef}
+                    className="overflow-x-scroll smooth-scroll rounded-lg shadow bg-white" // Added bg-white for boxed view consistency
+                    onScroll={handleTableScroll}
+                    style={{ maxHeight: "70vh", overflowY: "auto" }} // Optional: vertical scrolling with max height
+                  >
+                    <table className="w-full table-auto table-sticky-header">
+                      {" "}
+                      {/* Added table-sticky-header class */}
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[60px]">
+                            Serial No.
+                          </th>
+                          <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">
+                            Title
+                          </th>
+                          <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[300px] max-w-[300px]">
+                            Description
+                          </th>
+                          <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[150px]">
+                            YouTube
+                          </th>
+                          <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
+                            Allow For
+                          </th>
+                          <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[150px]">
+                            Subject
+                          </th>
+                          <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[150px]">
+                            Level
+                          </th>
+                          <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
+                            Status
+                          </th>
+                          <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
+                            Details
+                          </th>
+                          <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[80px]">
+                            Index
+                          </th>
+                          <th className="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {rows.length > 0 ? (
+                          rows.map((r, index) => (
+                            <React.Fragment key={r.vision_id}>
+                              <tr className="hover:bg-gray-50">
+                                <td className="p-3 text-sm min-w-[60px]">
+                                  {(currentPage - 1) * perPage + index + 1}
+                                </td>
+                                <td className="p-3 text-sm min-w-[200px]">
+                                  {r.title}
+                                </td>
+                                <td
+                                  className="p-3 text-sm min-w-[300px] max-w-[300px] whitespace-normal break-words overflow-y-auto max-h-32"
+                                  style={{ wordBreak: "break-word" }}
                                 >
-                                  {r.status === 1 ? "Active" : "Inactive"}
-                                </span>
-                              </td>
-                              <td className="p-3 text-sm min-w-[120px]">
-                                <button
-                                  onClick={() =>
-                                    setExpanded((e) => ({
-                                      ...e,
-                                      [r.vision_id]: !e[r.vision_id],
-                                    }))
-                                  }
-                                  className="text-sky-600 hover:text-sky-800"
-                                >
-                                  {expanded[r.vision_id]
-                                    ? "Hide Details"
-                                    : "Show Details"}
-                                </button>
-                              </td>
-                              <td className="p-3 text-sm min-w-[80px]">
-                                {r.index || "-"}
-                              </td>
-                              <td className="p-3 text-sm min-w-[120px]">
-                                <div className="flex gap-2">
-                                  <button
-                                    onClick={() => {
-                                      setEditRow(r);
-                                      setShowEdit(true);
-                                    }}
-                                    className="text-blue-600 hover:text-blue-800"
+                                  {r.description}
+                                </td>
+                                <td className="p-3 text-sm min-w-[150px]">
+                                  {r.youtube_url ? (
+                                    <a
+                                      href={r.youtube_url}
+                                      target="_blank"
+                                      className="text-sky-600 hover:underline"
+                                    >
+                                      Link
+                                    </a>
+                                  ) : (
+                                    "-"
+                                  )}
+                                </td>
+                                <td className="p-3 text-sm min-w-[100px]">
+                                  {r.allow_for === 1
+                                    ? "All"
+                                    : r.allow_for === 2
+                                    ? "Teacher"
+                                    : "Student"}
+                                </td>
+                                <td className="p-3 text-sm min-w-[150px]">
+                                  {r.subject}
+                                </td>
+                                <td className="p-3 text-sm min-w-[150px]">
+                                  {r.level}
+                                </td>
+                                <td className="p-3 text-sm min-w-[100px]">
+                                  <span
+                                    className={`px-2 py-1 text-xs rounded-full ${
+                                      r.status === 1
+                                        ? "bg-green-100 text-green-800"
+                                        : "bg-red-100 text-red-800"
+                                    }`}
                                   >
-                                    <IconEdit size={18} />
-                                  </button>
+                                    {r.status === 1 ? "Active" : "Inactive"}
+                                  </span>
+                                </td>
+                                <td className="p-3 text-sm min-w-[120px]">
                                   <button
-                                    onClick={() => {
-                                      setVisionToDelete(r);
-                                      setShowDeleteModal(true);
-                                    }}
-                                    className="text-red-600 hover:text-red-800"
+                                    onClick={() =>
+                                      setExpanded((e) => ({
+                                        ...e,
+                                        [r.vision_id]: !e[r.vision_id],
+                                      }))
+                                    }
+                                    className="text-sky-600 hover:text-sky-800"
                                   >
-                                    <IconTrash size={18} />
+                                    {expanded[r.vision_id]
+                                      ? "Hide Details"
+                                      : "Show Details"}
                                   </button>
-                                </div>
-                              </td>
-                            </tr>
-
-                            {expanded[r.vision_id] && (
-                              <tr>
-                                <td colSpan={11} className="p-4 bg-gray-50">
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {r.questions.map((q) => (
-                                      <div
-                                        key={q.question_id}
-                                        className="bg-white p-4 rounded-lg shadow"
-                                      >
-                                        <div className="font-semibold text-gray-700">
-                                          [{q.question_type.toUpperCase()}{" "}
-                                          Question]
-                                        </div>
-                                        <div className="mt-2">{q.question}</div>
-                                        {q.question_type === "mcq" &&
-                                          q.options && (
-                                            <ul className="mt-3 space-y-2">
-                                              {Object.entries(q.options).map(
-                                                ([k, opt]) => (
-                                                  <li
-                                                    key={k}
-                                                    className="flex items-start"
-                                                  >
-                                                    <span className="font-medium mr-2">
-                                                      {k.toUpperCase()}:
-                                                    </span>
-                                                    <span>
-                                                      {opt}
-                                                      {q.correct_answer ===
-                                                        k && (
-                                                        <span className="ml-2 bg-green-100 text-green-800 text-xs px-2 py-1 rounded">
-                                                          Correct
-                                                        </span>
-                                                      )}
-                                                    </span>
-                                                  </li>
-                                                )
-                                              )}
-                                            </ul>
-                                          )}
-                                      </div>
-                                    ))}
+                                </td>
+                                <td className="p-3 text-sm min-w-[80px]">
+                                  {r.index || "-"}
+                                </td>
+                                <td className="p-3 text-sm min-w-[120px]">
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={() => {
+                                        setEditRow(r);
+                                        setShowEdit(true);
+                                      }}
+                                      className="text-blue-600 hover:text-blue-800"
+                                    >
+                                      <IconEdit size={18} />
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setVisionToDelete(r);
+                                        setShowDeleteModal(true);
+                                      }}
+                                      className="text-red-600 hover:text-red-800"
+                                    >
+                                      <IconTrash size={18} />
+                                    </button>
                                   </div>
                                 </td>
                               </tr>
-                            )}
-                          </React.Fragment>
-                        ))
-                      ) : (
-                        <tr>
-                          <td
-                            colSpan={11}
-                            className="p-8 text-center text-gray-500"
-                          >
-                            No visions found
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+
+                              {expanded[r.vision_id] && (
+                                <tr>
+                                  <td colSpan={11} className="p-4 bg-gray-50">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                      {r.questions.map((q) => (
+                                        <div
+                                          key={q.question_id}
+                                          className="bg-white p-4 rounded-lg shadow"
+                                        >
+                                          <div className="font-semibold text-gray-700">
+                                            [{q.question_type.toUpperCase()}{" "}
+                                            Question]
+                                          </div>
+                                          <div className="mt-2">
+                                            {q.question}
+                                          </div>
+                                          {q.question_type === "mcq" &&
+                                            q.options && (
+                                              <ul className="mt-3 space-y-2">
+                                                {Object.entries(q.options).map(
+                                                  ([k, opt]) => (
+                                                    <li
+                                                      key={k}
+                                                      className="flex items-start"
+                                                    >
+                                                      <span className="font-medium mr-2">
+                                                        {k.toUpperCase()}:
+                                                      </span>
+                                                      <span>
+                                                        {opt}
+                                                        {q.correct_answer ===
+                                                          k && (
+                                                          <span className="ml-2 bg-green-100 text-green-800 text-xs px-2 py-1 rounded">
+                                                            Correct
+                                                          </span>
+                                                        )}
+                                                      </span>
+                                                    </li>
+                                                  )
+                                                )}
+                                              </ul>
+                                            )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          ))
+                        ) : (
+                          <tr>
+                            <td
+                              colSpan={11}
+                              className="p-8 text-center text-gray-500"
+                            >
+                              No visions found
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
 
                 {totalPages > 1 && (
