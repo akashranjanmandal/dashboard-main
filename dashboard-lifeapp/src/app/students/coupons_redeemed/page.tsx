@@ -11,8 +11,55 @@ import {
   IconSettings,
   IconDownload,
   IconX,
+  IconChevronLeft,
+  IconChevronRight,
 } from "@tabler/icons-react";
 import { ChevronDown } from "lucide-react";
+
+// Add CSS styles for the new features
+const tableStyles = `
+  <style>
+    .table-container {
+      position: relative;
+    }
+    .scroll-hint-left, .scroll-hint-right {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(111, 66, 193, 0.9);
+      color: white;
+      padding: 12px 16px;
+      border-radius: 10%; /* Changed from 50% to 10% as requested */
+      cursor: pointer;
+      z-index: 5;
+      transition: opacity 0.3s;
+      border: none;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    }
+    .scroll-hint-left {
+      left: 15px;
+    }
+    .scroll-hint-right {
+      right: 15px;
+    }
+    .scroll-hint-hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    /* Sticky table header */
+    .table-sticky-header thead th {
+      position: sticky;
+      top: 0;
+      background: #f8f9fa;
+      z-index: 1;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    /* Smooth scrolling */
+    .smooth-scroll {
+      scroll-behavior: smooth;
+    }
+  </style>
+`;
 
 interface CouponRedemption {
   "Student Name": string;
@@ -259,6 +306,43 @@ export default function CouponsRedeemed() {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [schoolCodeInput, setSchoolCodeInput] = useState("");
 
+  // Refs for table scrolling functionality
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const [showLeftHint, setShowLeftHint] = useState(false);
+  const [showRightHint, setShowRightHint] = useState(true);
+
+  // Update scroll hints based on current scroll position
+  const updateScrollHints = () => {
+    const container = tableContainerRef.current;
+    if (container) {
+      const { scrollLeft, scrollWidth, clientWidth } = container;
+      setShowLeftHint(scrollLeft > 10);
+      setShowRightHint(scrollLeft < scrollWidth - clientWidth - 10);
+    }
+  };
+
+  // Handle scroll events to show/hide scroll hints
+  const handleTableScroll = () => {
+    updateScrollHints();
+  };
+
+  // Scroll table horizontally with larger increments and smooth behavior
+  const scrollTableHorizontally = (direction: "left" | "right") => {
+    if (tableContainerRef.current) {
+      const container = tableContainerRef.current;
+      const scrollAmount = container.clientWidth * 0.8; // Scroll 80% of viewport width
+      container.scrollTo({
+        left:
+          direction === "left"
+            ? container.scrollLeft - scrollAmount
+            : container.scrollLeft + scrollAmount,
+        behavior: "smooth",
+      });
+      // Update hints after scroll
+      setTimeout(updateScrollHints, 300);
+    }
+  };
+
   // Fetch states
   useEffect(() => {
     async function fetchStates() {
@@ -490,6 +574,11 @@ export default function CouponsRedeemed() {
   useEffect(() => {
     setIsClient(true);
     fetchCoupons("", "", "", "", "", "", "", "", "", "", "", "", "");
+
+    // Reset scroll hints when component mounts
+    setTimeout(() => {
+      updateScrollHints();
+    }, 100);
   }, []);
 
   const fetchCoupons = async (
@@ -536,6 +625,11 @@ export default function CouponsRedeemed() {
       const tableData = await response.json();
       setCoupons(tableData as CouponRedemption[]);
       setError(null);
+
+      // Reset scroll hints when new data loads
+      setTimeout(() => {
+        updateScrollHints();
+      }, 100);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error occurred";
@@ -738,11 +832,13 @@ export default function CouponsRedeemed() {
 
   return (
     <div className={`page bg-light ${inter.className} font-sans`}>
+      {/* Inject CSS styles */}
+      <div dangerouslySetInnerHTML={{ __html: tableStyles }} />
       <Sidebar />
       <div className="page-wrapper" style={{ marginLeft: "250px" }}>
         <div className="page-body">
           <div className="container-xl pt-0 pb-4">
-            <div className="card">
+            <div className="card shadow-sm border-0">
               <div className="card-header">
                 <h3 className="card-title">Student Coupon Redemptions</h3>
               </div>
@@ -934,71 +1030,99 @@ export default function CouponsRedeemed() {
                     Error loading data: {error}
                   </div>
                 ) : (
-                  <div className="table-responsive">
-                    <table className="table table-vcenter table-hover">
-                      <thead>
-                        <tr>
-                          {/* Added serial number column header */}
-                          <th className="text-center">S.No.</th>
-                          <th>Student Name</th>
-                          <th>School Name</th>
-                          <th>Mobile Number</th>
-                          <th>State</th>
-                          <th>City</th>
-                          <th>Cluster</th>
-                          <th>Block</th>
-                          <th>District</th>
-                          <th>Grade</th>
-                          <th>Coupon Title</th>
-                          <th>Coins Redeemed</th>
-                          <th>Status</th>
-                          <th>School Code</th>
-                          <th>User ID</th>
-                          <th>Redeemed Date</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {currentItems.length === 0 ? (
+                  <div className="table-container">
+                    {/* Scroll hints for visual indication - larger buttons with significant scroll */}
+                    <button
+                      className={`scroll-hint-left ${
+                        !showLeftHint ? "scroll-hint-hidden" : ""
+                      }`}
+                      onClick={() => scrollTableHorizontally("left")}
+                      aria-label="Scroll left"
+                    >
+                      <IconChevronLeft size={24} />
+                    </button>
+                    <button
+                      className={`scroll-hint-right ${
+                        !showRightHint ? "scroll-hint-hidden" : ""
+                      }`}
+                      onClick={() => scrollTableHorizontally("right")}
+                      aria-label="Scroll right"
+                    >
+                      <IconChevronRight size={24} />
+                    </button>
+
+                    {/* Table with sticky headers and smooth scrolling */}
+                    <div
+                      ref={tableContainerRef}
+                      className="overflow-x-scroll smooth-scroll rounded-lg shadow"
+                      onScroll={handleTableScroll}
+                      style={{ maxHeight: "70vh", overflowY: "auto" }}
+                    >
+                      <table className="table table-vcenter card-table w-full table-auto min-w-full bg-white border border-gray-200 table-sticky-header">
+                        <thead className="bg-gray-100 text-xs font-semibold uppercase text-gray-600">
                           <tr>
-                            {/* Updated colspan to 15 for new column */}
-                            <td colSpan={15} className="text-center">
-                              No redemptions found
-                            </td>
+                            {/* Added serial number column header */}
+                            <th className="text-center">S.No.</th>
+                            <th>Student Name</th>
+                            <th>School Name</th>
+                            <th>Mobile Number</th>
+                            <th>State</th>
+                            <th>City</th>
+                            <th>Cluster</th>
+                            <th>Block</th>
+                            <th>District</th>
+                            <th>Grade</th>
+                            <th>Coupon Title</th>
+                            <th>Coins Redeemed</th>
+                            <th>Status</th>
+                            <th>School Code</th>
+                            <th>User ID</th>
+                            <th>Redeemed Date</th>
                           </tr>
-                        ) : (
-                          currentItems.map((coupon, index) => (
-                            <tr key={index}>
-                              {/* Added serial number cell */}
-                              <td className="text-center">
-                                {indexOfFirstItem + index + 1}
-                              </td>
-                              <td>{coupon["Student Name"]}</td>
-                              <td>{coupon["School Name"]}</td>
-                              <td>{coupon["Mobile Number"]}</td>
-                              <td>{coupon.state}</td>
-                              <td>{coupon.city}</td>
-                              <td>{coupon.cluster || "-"}</td>
-                              <td>{coupon.block || "-"}</td>
-                              <td>{coupon.district || "-"}</td>
-                              <td>{coupon.grade}</td>
-                              <td>{coupon["Coupon Title"]}</td>
-                              <td>{coupon["Coins Redeemed"]}</td>
-                              <td>{(coupon as any).status || "-"}</td>
-                              <td>{coupon["School Code"]}</td>
-                              <td>{coupon.user_id}</td>
-                              <td>
-                                {formatDate(coupon["Coupon Redeemed Date"])}
+                        </thead>
+                        <tbody className="text-sm text-gray-700">
+                          {currentItems.length === 0 ? (
+                            <tr>
+                              {/* Updated colspan to 15 for new column */}
+                              <td colSpan={16} className="text-center">
+                                No redemptions found
                               </td>
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-
-                    {!loading && !error && coupons.length > 0 && (
-                      <PaginationControls />
-                    )}
+                          ) : (
+                            currentItems.map((coupon, index) => (
+                              <tr key={index} className="border-t">
+                                {/* Added serial number cell */}
+                                <td className="text-center">
+                                  {indexOfFirstItem + index + 1}
+                                </td>
+                                <td>{coupon["Student Name"]}</td>
+                                <td>{coupon["School Name"]}</td>
+                                <td>{coupon["Mobile Number"]}</td>
+                                <td>{coupon.state}</td>
+                                <td>{coupon.city}</td>
+                                <td>{coupon.cluster || "-"}</td>
+                                <td>{coupon.block || "-"}</td>
+                                <td>{coupon.district || "-"}</td>
+                                <td>{coupon.grade}</td>
+                                <td>{coupon["Coupon Title"]}</td>
+                                <td>{coupon["Coins Redeemed"]}</td>
+                                <td>{(coupon as any).status || "-"}</td>
+                                <td>{coupon["School Code"]}</td>
+                                <td>{coupon.user_id}</td>
+                                <td>
+                                  {formatDate(coupon["Coupon Redeemed Date"])}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
+                )}
+
+                {!loading && !error && coupons.length > 0 && (
+                  <PaginationControls />
                 )}
               </div>
             </div>
