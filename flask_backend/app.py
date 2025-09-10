@@ -1,11 +1,10 @@
-
 # app.py
 from binascii import Error
 import csv
 import io
 import math
 import traceback
-import requests 
+import requests
 from flask import Flask, Response, json, jsonify, request, send_file
 from flask_cors import CORS
 import pymysql.cursors
@@ -16,118 +15,117 @@ import logging
 from werkzeug.utils import secure_filename
 from flask import session
 import json
-  # Added import
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 from pathlib import Path
-app = Flask(__name__)
-# CORS(app)
-
-# Configure CORS to allow requests from http://localhost:3000 with credentials
-CORS(app, resources={r"/*": {"origins":"*"}}, supports_credentials=True)
-
 import os
 from dotenv import load_dotenv
 import uuid
 import boto3
 
-# Load environment variables from .env file
-env_path = Path(__file__).resolve().parent / '.local.env'
+# ----------  NEW: in-memory toggle ----------
+CURRENT_DB_MODE = "prod"          # 'prod' | 'staging'
+# ----------  END NEW  -----------------------
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
+# Load environment variables
+env_path = Path(__file__).resolve().parent / ".local.env"
 load_dotenv(dotenv_path=env_path)
 
+# DigitalOcean Spaces config
+DO_SPACES_KEY    = os.getenv("DO_SPACES_KEY")
+DO_SPACES_SECRET = os.getenv("DO_SPACES_SECRET")
+DO_SPACES_REGION = os.getenv("DO_SPACES_REGION")
+DO_SPACES_BUCKET = os.getenv("DO_SPACES_BUCKET")
+DO_SPACES_ENDPOINT=os.getenv("DO_SPACES_ENDPOINT")
 
-# DigitalOcean Spaces Config
-DO_SPACES_KEY = os.getenv('DO_SPACES_KEY')
-DO_SPACES_SECRET = os.getenv('DO_SPACES_SECRET')
-DO_SPACES_REGION = os.getenv('DO_SPACES_REGION')
-DO_SPACES_BUCKET = os.getenv('DO_SPACES_BUCKET')
-DO_SPACES_ENDPOINT = os.getenv('DO_SPACES_ENDPOINT')
-
-
+# ----------  UPDATED connection factory ----------
 def get_db_connection():
-    host=os.getenv('DB_HOST', '139.59.84.157')
-    port=int(os.getenv('DB_PORT', 3306))
-    user=os.getenv('DB_USERNAME', 'root')
-    password=os.getenv('DB_PASSWORD', 'LIFELAB@1server')
-    database=os.getenv('DB_DATABASE', 'lifeapp')
-    return pymysql.connect(
-        host = host,
-        port = port,
-        user = user,
-        password=password,
-        database=database,
-        cursorclass=pymysql.cursors.DictCursor
+    # Always use the same credentials; only host flips
+    host = (
+        os.getenv("DB_HOST", "139.59.84.157")
+        if CURRENT_DB_MODE == "prod"
+        else "139.59.16.159"
     )
+    return pymysql.connect(
+        host=host,
+        port=int(os.getenv("DB_PORT", 3306)),
+        user=os.getenv("DB_USERNAME", "root"),
+        password=os.getenv("DB_PASSWORD", "LIFELAB@1server"),
+        database=os.getenv("DB_DATABASE", "lifeapp"),
+        cursorclass=pymysql.cursors.DictCursor,
+    )
+# ----------  END UPDATED  -----------------------
 
+# ----------  NEW REST endpoints ----------
+@app.route("/api/db-mode", methods=["GET"])
+def db_mode():
+    return jsonify({"mode": CURRENT_DB_MODE})
 
-@app.route('/api/login', methods=['POST'])
+@app.route("/api/toggle-db", methods=["POST"])
+def toggle_db():
+    global CURRENT_DB_MODE
+    CURRENT_DB_MODE = "staging" if CURRENT_DB_MODE == "prod" else "prod"
+    return jsonify({"mode": CURRENT_DB_MODE})
+# ----------  END NEW  -----------------------
+
+# ----------  existing routes untouched ----------
+@app.route("/api/login", methods=["POST"])
 def admin_login():
     data = request.json
-    email = data.get('email')
-    password = data.get('password')
+    email = data.get("email")
+    password = data.get("password")
     cursor = get_db_connection().cursor(pymysql.cursors.DictCursor)
-
-    cursor.execute("SELECT id, email, password, type FROM users WHERE email=%s AND type=1", (email,))
+    cursor.execute(
+        "SELECT id, email, password, type FROM users WHERE email=%s AND type=1",
+        (email,),
+    )
     user = cursor.fetchone()
-
     if not user:
         return jsonify({
-            'errors': {
-                'title': 'Login Failed!',
-                'icon': 'AlertCircleIcon',
-                'type': 'warning',
-                'message': 'Admin not exist'
+            "errors": {
+                "title": "Login Failed!",
+                "icon": "AlertCircleIcon",
+                "type": "warning",
+                "message": "Admin not exist",
             }
         }), 401
-
-    if password != user['password']:
+    if password != user["password"]:
         return jsonify({
-            'errors': {
-                'title': 'Login Failed!',
-                'icon': 'EyeOffIcon',
-                'type': 'warning',
-                'message': 'Admin wrong password'
+            "errors": {
+                "title": "Login Failed!",
+                "icon": "EyeOffIcon",
+                "type": "warning",
+                "message": "Admin wrong password",
             }
         }), 401
-
-    # Dummy response (token generation skipped)
     admin = {
-        'id': user['id'],
-        'email': user['email'],
-        'role': 'admin',
-        'ability': [{'action': 'manage', 'subject': 'all'}]
+        "id": user["id"],
+        "email": user["email"],
+        "role": "admin",
+        "ability": [{"action": "manage", "subject": "all"}],
     }
-
     return jsonify({
-        'accessToken': 'test-token',  # Optional, just for frontend compatibility
-        'message': 'Login Success Full',
-        'res': True,
-        'admin': admin
+        "accessToken": "test-token",
+        "message": "Login Success Full",
+        "res": True,
+        "admin": admin,
     }), 200
 
-@app.route('/api/logout', methods=['POST'])
+@app.route("/api/logout", methods=["POST"])
 def admin_logout():
-    # For stateless token-based login, logout is usually handled on frontend
-    # But we return a success response for frontend compatibility
-    return jsonify({
-        'message': 'Logout successful',
-        'res': True
-    }), 200
+    return jsonify({"message": "Logout successful", "res": True}), 200
 
-
-@app.route('/debug-env', methods = ['GET'])
+@app.route("/debug-env", methods=["GET"])
 def debug_env():
-    host = os.getenv('DB_HOST')
-    user = os.getenv('DB_USERNAME')
-    password = os.getenv('DB_PASSWORD')
-    return jsonify({
-        'host': host,
-        'user': user,
-        'password': password
-    })
+    host = os.getenv("DB_HOST")
+    user = os.getenv("DB_USERNAME")
+    password = os.getenv("DB_PASSWORD")
+    return jsonify({"host": host, "user": user, "password": password})
 
 # @app.route('/')
 # def backup():
@@ -178,7 +176,6 @@ def upload_media(file):
 ######################## HOME DASHBOARD APIs ######################################
 ###################################################################################
 ###################################################################################
-
 
 def build_filter_conditions(request_args=None):
     """Build SQL WHERE conditions and parameters based on global filters"""
@@ -317,9 +314,11 @@ def get_user_signups2():
             params.append(filters['city'])
 
         # Add global filter: school_code
-        if filters.get('school_code') and filters['school_code'].strip() != '':
-            base_query += " AND school_code = %s"
-            params.append(filters['school_code'].strip())
+        if filters.get('school_code') and filters['school_code'] != 'All':
+            school_code_value = str(filters['school_code']).strip()
+            if school_code_value:
+                base_query += " AND school_code = %s"
+                params.append(school_code_value)
 
         # Add global filter: gender
         if filters.get('gender') and filters['gender'] != 'All':
@@ -808,6 +807,38 @@ def get_city_list():
     finally:
         connection.close()
 
+@app.route('/api/all-states-dropdown', methods=['GET'])
+def get_all_states_dropdown():
+    """
+    Returns all unique states from both users and schools tables for dropdown population.
+    This endpoint is specifically designed for frontend dropdowns and returns all available states.
+    """
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            sql = """
+                SELECT DISTINCT state 
+                FROM (
+                    SELECT DISTINCT state FROM lifeapp.users 
+                    WHERE state IS NOT NULL AND state != '' AND state != '2' AND state != 'null'
+                    UNION
+                    SELECT DISTINCT state FROM lifeapp.schools 
+                    WHERE state IS NOT NULL AND state != '' AND state != '2' AND state != 'null'
+                ) AS combined_states
+                ORDER BY state;
+            """
+            cursor.execute(sql)
+            result = cursor.fetchall()
+            
+            # Extract state names into a simple list
+            states = [row['state'] for row in result if row['state']]
+            
+        return jsonify(states)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
 @app.route('/api/school-code-list', methods=['GET', 'POST'])
 def get_school_code_list():
     connection = get_db_connection()
@@ -1253,52 +1284,334 @@ def get_teacher_demograph():
 
 @app.route('/api/total-points-earned', methods=['POST'])
 def get_total_points_earned():
-    sql1 = """
-        SELECT COALESCE(SUM(points), 0) AS total_points 
-        FROM lifeapp.la_mission_completes;
-    """
-    sql2 = """
-        SELECT COALESCE(SUM(coins), 0) AS total_coins 
-        FROM lifeapp.la_quiz_game_results;
-    """
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
+            # Get filter parameters from request
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            
+            # Build mission points query with proper JOINs and filters
+            sql1 = """
+                SELECT COALESCE(SUM(lamc.points), 0) AS total_points 
+                FROM lifeapp.la_mission_completes lamc
+                INNER JOIN lifeapp.users u ON u.id = lamc.user_id
+                WHERE lamc.points IS NOT NULL AND lamc.points > 0
+            """
+            params1 = []
+            
+            # Add filters to mission points query - matching the pattern from working APIs
+            if filters.get('state') and filters['state'] != 'All' and filters['state'].strip():
+                sql1 += " AND u.state = %s"
+                params1.append(filters['state'].strip())
+            
+            if filters.get('city') and filters['city'] != 'All' and filters['city'].strip():
+                sql1 += " AND u.city = %s"
+                params1.append(filters['city'].strip())
+            
+            if filters.get('school_code') and filters['school_code'] != 'All' and str(filters['school_code']).strip():
+                sql1 += " AND u.school_code = %s"
+                params1.append(int(filters['school_code']) if str(filters['school_code']).isdigit() else filters['school_code'])
+            
+            if filters.get('user_type') and filters['user_type'] != 'All':
+                if filters['user_type'] == 'Student':
+                    sql1 += " AND u.type = 3"
+                elif filters['user_type'] == 'Teacher':
+                    sql1 += " AND u.type = 5"
+                elif filters['user_type'] == 'Admin':
+                    sql1 += " AND u.type = 1"
+                elif filters['user_type'] == 'Mentor':
+                    sql1 += " AND u.type = 4"
+                elif filters['user_type'] == 'Unspecified':
+                    sql1 += " AND (u.type NOT IN (1,3,4,5) OR u.type IS NULL)"
+            
+            if filters.get('grade') and filters['grade'] != 'All':
+                grade_num = filters['grade'].replace('Grade ', '').strip()
+                if grade_num.isdigit():
+                    sql1 += " AND u.grade = %s"
+                    params1.append(int(grade_num))
+            
+            if filters.get('gender') and filters['gender'] != 'All':
+                if filters['gender'] == 'Male':
+                    sql1 += " AND u.gender = 1"
+                elif filters['gender'] == 'Female':
+                    sql1 += " AND u.gender = 2"
+            
+            if filters.get('date_range') and filters['date_range'] != 'All':
+                date_filter = filters['date_range']
+                if date_filter == 'last7days':
+                    sql1 += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                elif date_filter == 'last30days':
+                    sql1 += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+                elif date_filter == 'last3months':
+                    sql1 += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+                elif date_filter == 'last6months':
+                    sql1 += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
+                elif date_filter == 'lastyear':
+                    sql1 += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
+            
+            if filters.get('start_date') and filters.get('end_date'):
+                sql1 += " AND lamc.created_at BETWEEN %s AND %s"
+                params1.extend([filters['start_date'], filters['end_date']])
+            
+            # Build quiz coins query with proper JOINs and filters
+            sql2 = """
+                SELECT COALESCE(SUM(lqgr.coins), 0) AS total_coins 
+                FROM lifeapp.la_quiz_game_results lqgr
+                INNER JOIN lifeapp.users u ON u.id = lqgr.user_id
+                WHERE lqgr.coins IS NOT NULL AND lqgr.coins > 0
+            """
+            params2 = []
+            
+            # Add filters to quiz coins query - matching the pattern from working APIs
+            if filters.get('state') and filters['state'] != 'All' and filters['state'].strip():
+                sql2 += " AND u.state = %s"
+                params2.append(filters['state'].strip())
+            
+            if filters.get('city') and filters['city'] != 'All' and filters['city'].strip():
+                sql2 += " AND u.city = %s"
+                params2.append(filters['city'].strip())
+            
+            if filters.get('school_code') and filters['school_code'] != 'All' and str(filters['school_code']).strip():
+                sql2 += " AND u.school_code = %s"
+                params2.append(int(filters['school_code']) if str(filters['school_code']).isdigit() else filters['school_code'])
+            
+            if filters.get('user_type') and filters['user_type'] != 'All':
+                if filters['user_type'] == 'Student':
+                    sql2 += " AND u.type = 3"
+                elif filters['user_type'] == 'Teacher':
+                    sql2 += " AND u.type = 5"
+                elif filters['user_type'] == 'Admin':
+                    sql2 += " AND u.type = 1"
+                elif filters['user_type'] == 'Mentor':
+                    sql2 += " AND u.type = 4"
+                elif filters['user_type'] == 'Unspecified':
+                    sql2 += " AND (u.type NOT IN (1,3,4,5) OR u.type IS NULL)"
+            
+            if filters.get('grade') and filters['grade'] != 'All':
+                grade_num = filters['grade'].replace('Grade ', '').strip()
+                if grade_num.isdigit():
+                    sql2 += " AND u.grade = %s"
+                    params2.append(int(grade_num))
+            
+            if filters.get('gender') and filters['gender'] != 'All':
+                if filters['gender'] == 'Male':
+                    sql2 += " AND u.gender = 1"
+                elif filters['gender'] == 'Female':
+                    sql2 += " AND u.gender = 2"
+            
+            if filters.get('date_range') and filters['date_range'] != 'All':
+                date_filter = filters['date_range']
+                if date_filter == 'last7days':
+                    sql2 += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                elif date_filter == 'last30days':
+                    sql2 += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+                elif date_filter == 'last3months':
+                    sql2 += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+                elif date_filter == 'last6months':
+                    sql2 += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
+                elif date_filter == 'lastyear':
+                    sql2 += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
+            
+            if filters.get('start_date') and filters.get('end_date'):
+                sql2 += " AND lqgr.created_at BETWEEN %s AND %s"
+                params2.extend([filters['start_date'], filters['end_date']])
+            
             # Execute first query to get points sum
-            cursor.execute(sql1)
+            cursor.execute(sql1, params1)
             result_points = cursor.fetchone()
-            total_points = result_points['total_points']
+            total_points = result_points['total_points'] if result_points else 0
 
             # Execute second query to get coins sum
-            cursor.execute(sql2)
+            cursor.execute(sql2, params2)
             result_coins = cursor.fetchone()
-            total_coins = result_coins['total_coins']
+            total_coins = result_coins['total_coins'] if result_coins else 0
 
-            # Calculate combined total
-            combined_total = total_points + total_coins
+            # Calculate combined total and ensure it's not negative
+            combined_total = max(0, total_points + total_coins)
 
         return jsonify({"total_points": combined_total}), 200
     except Exception as e:
+        logger.error(f"Error in total-points-earned: {str(e)}")
         return jsonify({"error": str(e)}), 500
     finally:
-        if 'connection' in locals():
+        if 'connection' in locals() and connection:
             connection.close()
 
 @app.route('/api/total-points-redeemed', methods = ['POST'])
 def get_total_points_redeemed():
-    sql  = """
-        select sum(coins) as total_coins_redeemed from lifeapp.coupon_redeems;
-    """
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute(sql)
+            # Get filter parameters from request
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            
+            # Build base query with proper JOINs for demographic filtering
+            sql = """
+                SELECT COALESCE(SUM(cr.coins), 0) AS total_coins_redeemed
+                FROM lifeapp.coupon_redeems cr
+                INNER JOIN lifeapp.users u ON u.id = cr.user_id
+                WHERE 1=1
+            """
+            params = []
+            
+            # Apply user type filter (default to students if not specified)
+            if filters.get('user_type') and filters['user_type'] != 'All':
+                if filters['user_type'] == 'Student':
+                    sql += " AND u.type = 3"
+                elif filters['user_type'] == 'Teacher':
+                    sql += " AND u.type = 5"
+                elif filters['user_type'] == 'Mentor':
+                    sql += " AND u.type = 4"
+            else:
+                # If no user_type filter specified, include all users
+                # This ensures we don't default to students only and show 0
+                pass
+            
+            # Apply demographic filters
+            # State filter
+            if filters.get('state') and filters['state'] != 'All':
+                sql += " AND u.state = %s"
+                params.append(filters['state'])
+            
+            # City filter
+            if filters.get('city') and filters['city'] != 'All':
+                sql += " AND u.city = %s"
+                params.append(filters['city'])
+            
+            # School code filter
+            if filters.get('school_code') and filters['school_code'] != 'All':
+                school_code = filters['school_code']
+                if school_code is not None and str(school_code).strip():
+                    sql += " AND u.school_code = %s"
+                    params.append(str(school_code).strip())
+            
+            # Grade filter
+            if filters.get('grade') and filters['grade'] != 'All':
+                sql += " AND u.grade = %s"
+                params.append(filters['grade'])
+            
+            # Gender filter
+            if filters.get('gender') and filters['gender'] != 'All':
+                sql += " AND u.gender = %s"
+                params.append(filters['gender'])
+            
+            # Date range filter for redemptions
+            if filters.get('date_range') and filters['date_range'] != 'All':
+                if filters['date_range'] == 'last7days':
+                    sql += " AND cr.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                elif filters['date_range'] == 'last30days':
+                    sql += " AND cr.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+                elif filters['date_range'] == 'last3months':
+                    sql += " AND cr.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+                elif filters['date_range'] == 'last6months':
+                    sql += " AND cr.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
+                elif filters['date_range'] == 'lastyear':
+                    sql += " AND cr.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
+            
+            # Custom date range filter
+            if filters.get('start_date') and filters.get('end_date'):
+                sql += " AND cr.created_at BETWEEN %s AND %s"
+                params.extend([filters['start_date'], filters['end_date']])
+            
+            cursor.execute(sql, params)
             result = cursor.fetchall()  
         return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
         connection.close()
+
+@app.route('/api/total_sessions_created', methods=['POST'])
+def get_total_sessions_created():
+    """Get total count of sessions created by mentors with filter support."""
+    try:
+        data = request.get_json()
+        
+        # Extract filter parameters
+        state = data.get('state', '')
+        city = data.get('city', '')
+        school_code = data.get('school_code', '')
+        user_type = data.get('user_type', '')
+        grade = data.get('grade', '')
+        gender = data.get('gender', '')
+        date_range = data.get('date_range', '')
+        
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            # Base query with JOIN to users table for demographic filtering
+            sql = """
+                SELECT COUNT(*) as count
+                FROM lifeapp.la_sessions las
+                INNER JOIN lifeapp.users u ON las.user_id = u.id
+                WHERE u.type = 4
+            """
+            
+            params = []
+            
+            # Apply filters based on user demographics
+            if state and state != 'All':
+                sql += " AND u.state = %s"
+                params.append(state)
+                
+            if city and city != 'All':
+                sql += " AND u.city = %s"
+                params.append(city)
+                
+            if school_code and school_code != 'All':
+                sql += " AND u.school_code = %s"
+                params.append(school_code)
+                
+            if user_type and user_type != 'All':
+                if user_type == 'Student':
+                    sql += " AND u.type = 3"
+                elif user_type == 'Mentor':
+                    sql += " AND u.type = 4"
+                elif user_type == 'Teacher':
+                    sql += " AND u.type = 5"
+                    
+            if grade and grade != 'All':
+                sql += " AND u.grade = %s"
+                params.append(grade)
+                
+            if gender and gender != 'All':
+                if gender == 'Male':
+                    sql += " AND u.gender = 1"
+                elif gender == 'Female':
+                    sql += " AND u.gender = 2"
+                    
+            if date_range and date_range != 'All':
+                if date_range == 'Today':
+                    sql += " AND DATE(las.created_at) = CURDATE()"
+                elif date_range == 'Yesterday':
+                    sql += " AND DATE(las.created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)"
+                elif date_range == 'This Week':
+                    sql += " AND WEEK(las.created_at, 1) = WEEK(CURDATE(), 1) AND YEAR(las.created_at) = YEAR(CURDATE())"
+                elif date_range == 'Last Week':
+                    sql += " AND WEEK(las.created_at, 1) = WEEK(DATE_SUB(CURDATE(), INTERVAL 1 WEEK), 1) AND YEAR(las.created_at) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 WEEK))"
+                elif date_range == 'This Month':
+                    sql += " AND MONTH(las.created_at) = MONTH(CURDATE()) AND YEAR(las.created_at) = YEAR(CURDATE())"
+                elif date_range == 'Last Month':
+                    sql += " AND MONTH(las.created_at) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND YEAR(las.created_at) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))"
+                elif date_range == 'This Year':
+                    sql += " AND YEAR(las.created_at) = YEAR(CURDATE())"
+                elif date_range == 'Last Year':
+                    sql += " AND YEAR(las.created_at) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 YEAR))"
+            
+            cursor.execute(sql, params)
+            result = cursor.fetchone()
+            count = result['count'] if result else 0
+            
+        return jsonify([{'count': count}]), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+    
+
 
 @app.route('/api/histogram_level_subject_challenges_complete', methods=['POST'])
 def get_histogram_data_level_subject_challenges_complete():
@@ -1810,38 +2123,6 @@ def get_all_states():
     finally:
         conn.close()
 
-@app.route('/api/all-states-dropdown', methods=['GET'])
-def get_all_states_dropdown():
-    """
-    Returns all unique states from both users and schools tables for dropdown population.
-    This endpoint is specifically designed for frontend dropdowns and returns all available states.
-    """
-    connection = get_db_connection()
-    try:
-        with connection.cursor() as cursor:
-            sql = """
-                SELECT DISTINCT state 
-                FROM (
-                    SELECT DISTINCT state FROM lifeapp.users 
-                    WHERE state IS NOT NULL AND state != '' AND state != '2' AND state != 'null'
-                    UNION
-                    SELECT DISTINCT state FROM lifeapp.schools 
-                    WHERE state IS NOT NULL AND state != '' AND state != '2' AND state != 'null'
-                ) AS combined_states
-                ORDER BY state;
-            """
-            cursor.execute(sql)
-            result = cursor.fetchall()
-            
-            # Extract state names into a simple list
-            states = [row['state'] for row in result if row['state']]
-            
-        return jsonify(states)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        connection.close()
-
 @app.route('/api/demograph-students-2', methods=['POST'])
 def get_demograph_students_2():
     """
@@ -2057,15 +2338,82 @@ def get_school_count():
 
 @app.route('/api/quiz_completes', methods= ['POST'])
 def get_quiz_completes():
-    connection = get_db_connection()
     try:
+        connection = get_db_connection()
         with connection.cursor() as cursor:
+            # Get filter parameters from request
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            
+            # Build base query with proper JOINs for quiz completions
             sql = """
-                select count(*) as count from lifeapp.la_quiz_games where completed_at is not null;
+                SELECT COUNT(*) as count 
+                FROM lifeapp.la_quiz_game_results lqgr 
+                INNER JOIN lifeapp.la_quiz_games lqg ON lqg.id = lqgr.la_quiz_game_id
+                INNER JOIN lifeapp.users u ON u.id = lqgr.user_id 
+                WHERE lqg.type = 2 AND u.type = 3
             """
-            cursor.execute(sql)
-            count = cursor.fetchall()
-        return jsonify(count)
+            params = []
+            
+            # Apply demographic filters
+            # State filter
+            if filters.get('state') and filters['state'] != 'All':
+                sql += " AND u.state = %s"
+                params.append(filters['state'])
+            
+            # City filter
+            if filters.get('city') and filters['city'] != 'All':
+                sql += " AND u.city = %s"
+                params.append(filters['city'])
+            
+            # School code filter
+            if filters.get('school_code') and filters['school_code'] != 'All':
+                school_code = filters['school_code']
+                if school_code is not None and str(school_code).strip():
+                    sql += " AND u.school_code = %s"
+                    params.append(str(school_code).strip())
+            
+            # Grade filter
+            if filters.get('grade') and filters['grade'] != 'All':
+                sql += " AND u.grade = %s"
+                params.append(filters['grade'])
+            
+            # Gender filter
+            if filters.get('gender') and filters['gender'] != 'All':
+                sql += " AND u.gender = %s"
+                params.append(filters['gender'])
+            
+            # User type filter (allow override but default to students)
+            if filters.get('user_type') and filters['user_type'] != 'All':
+                if filters['user_type'] == 'Student':
+                    sql += " AND u.type = 3"
+                elif filters['user_type'] == 'Teacher':
+                    sql += " AND u.type = 5"
+                elif filters['user_type'] == 'Mentor':
+                    sql += " AND u.type = 4"
+            
+            # Date range filter
+            if filters.get('date_range') and filters['date_range'] != 'All':
+                if filters['date_range'] == 'last7days':
+                    sql += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                elif filters['date_range'] == 'last30days':
+                    sql += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+                elif filters['date_range'] == 'last3months':
+                    sql += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+                elif filters['date_range'] == 'last6months':
+                    sql += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
+                elif filters['date_range'] == 'lastyear':
+                    sql += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
+            
+            # Custom date range filter
+            if filters.get('start_date') and filters.get('end_date'):
+                sql += " AND lqgr.created_at BETWEEN %s AND %s"
+                params.extend([filters['start_date'], filters['end_date']])
+            
+            cursor.execute(sql, params)
+            count = cursor.fetchone()
+        return jsonify([{'count': count['count']}])
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
@@ -2073,15 +2421,70 @@ def get_quiz_completes():
 
 @app.route('/api/total-missions-completed-assigned-by-teacher', methods = ['POST'])
 def get_total_missions_completed_assigned_by_teacher():
-    sql  = """
-        SELECT count(*) as count FROM lifeapp.la_mission_assigns lama INNER JOIN lifeapp.la_mission_completes lamc 
-            ON lamc.la_mission_id = lama.la_mission_id
-                and lamc.user_id =lama.user_id;
-    """
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute(sql)
+            # Get filter parameters from request
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            
+            # Count mission completions by students who have teacher assignments
+            # Since direct JOIN fails due to data structure, count completions by students
+            # who appear in the teacher assignment table
+            sql = """
+                SELECT COUNT(*) as count 
+                FROM lifeapp.la_mission_completes lamc 
+                INNER JOIN lifeapp.users u ON u.id = lamc.user_id 
+                WHERE u.type = 3 
+                AND lamc.user_id IN (
+                    SELECT DISTINCT user_id 
+                    FROM lifeapp.la_mission_assigns
+                )
+            """
+            params = []
+            
+            # Apply demographic filters
+            # State filter
+            if filters.get('state') and filters['state'] != 'All':
+                sql += " AND u.state = %s"
+                params.append(filters['state'])
+            
+            # City filter
+            if filters.get('city') and filters['city'] != 'All':
+                sql += " AND u.city = %s"
+                params.append(filters['city'])
+            
+            # School filter
+            if filters.get('school_code') and filters['school_code'] != 'All':
+                sql += " AND u.school_code = %s"
+                params.append(filters['school_code'])
+            
+            # Grade filter
+            if filters.get('grade') and filters['grade'] != 'All':
+                sql += " AND u.grade = %s"
+                params.append(filters['grade'])
+            
+            # Gender filter
+            if filters.get('gender') and filters['gender'] != 'All':
+                sql += " AND u.gender = %s"
+                params.append(filters['gender'])
+            
+            # User type filter (already filtered to students, but keeping for consistency)
+            if filters.get('user_type') and filters['user_type'] != 'All':
+                if filters['user_type'] == '3':  # Students only
+                    pass  # Already filtered above
+                else:
+                    # If filtering for non-students, return 0
+                    return jsonify([{'count': 0}]), 200
+            
+            # Date range filter
+            if filters.get('start_date') and filters.get('end_date'):
+                sql += " AND lamc.created_at >= %s AND lamc.created_at <= %s"
+                params.append(filters['start_date'])
+                params.append(filters['end_date'])
+            
+            cursor.execute(sql, params)
             result = cursor.fetchall()  
         return jsonify(result), 200
     except Exception as e:
@@ -2091,13 +2494,87 @@ def get_total_missions_completed_assigned_by_teacher():
 
 @app.route('/api/total_missions_completes', methods= ['POST'])
 def get_total_missions_completes() :
-    sql  = """
-        select count(*) as count from lifeapp.la_mission_completes lamc inner join lifeapp.la_missions lam on lam.id = lamc.la_mission_id where lam.type = 1;
-    """
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute(sql)
+            # Get filter parameters from request
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            
+            # Build base query with proper JOINs
+            sql = """
+                SELECT count(*) as count 
+                FROM lifeapp.la_mission_completes lamc 
+                INNER JOIN lifeapp.la_missions lam ON lam.id = lamc.la_mission_id 
+                INNER JOIN lifeapp.users u ON u.id = lamc.user_id 
+                WHERE lam.type = 1
+            """
+            params = []
+            
+            # Add state filter
+            if filters.get('state') and filters['state'] != 'All':
+                sql += " AND u.state = %s"
+                params.append(filters['state'])
+            
+            # Add city filter
+            if filters.get('city') and filters['city'] != 'All':
+                sql += " AND u.city = %s"
+                params.append(filters['city'])
+            
+            # Add school code filter
+            if filters.get('school_code') and filters['school_code'] != 'All':
+                sql += " AND u.school_code = %s"
+                params.append(filters['school_code'])
+            
+            # Add user type filter
+            if filters.get('user_type') and filters['user_type'] != 'All':
+                type_map = {
+                    'Admin': 1,
+                    'Student': 3,
+                    'Mentor': 4,
+                    'Teacher': 5
+                }
+                if filters['user_type'] in type_map:
+                    sql += " AND u.type = %s"
+                    params.append(type_map[filters['user_type']])
+                elif filters['user_type'] == 'Unspecified':
+                    sql += " AND (u.type NOT IN (1,3,4,5) OR u.type IS NULL)"
+            
+            # Add grade filter
+            if filters.get('grade') and filters['grade'] != 'All':
+                grade_num = filters['grade'].replace('Grade ', '')
+                if grade_num.isdigit():
+                    sql += " AND u.grade = %s"
+                    params.append(int(grade_num))
+            
+            # Add gender filter
+            if filters.get('gender') and filters['gender'] != 'All':
+                gender_map = {'Male': 1, 'Female': 2}
+                if filters['gender'] in gender_map:
+                    sql += " AND u.gender = %s"
+                    params.append(gender_map[filters['gender']])
+            
+            # Add date range filter
+            if filters.get('date_range') and filters['date_range'] != 'All':
+                date_filter = filters['date_range']
+                if date_filter == 'last7days':
+                    sql += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                elif date_filter == 'last30days':
+                    sql += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+                elif date_filter == 'last3months':
+                    sql += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+                elif date_filter == 'last6months':
+                    sql += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
+                elif date_filter == 'lastyear':
+                    sql += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
+            
+            # Add custom date range filter
+            if filters.get('start_date') and filters.get('end_date'):
+                sql += " AND lamc.created_at BETWEEN %s AND %s"
+                params.extend([filters['start_date'], filters['end_date']])
+            
+            cursor.execute(sql, params)
             result = cursor.fetchall()  
         return jsonify(result), 200
     except Exception as e:
@@ -2107,13 +2584,87 @@ def get_total_missions_completes() :
 
 @app.route('/api/total_jigyasa_completes', methods= ['POST'])
 def get_total_jigyasa_completes() :
-    sql  = """
-        select count(*) as count from lifeapp.la_mission_completes lamc inner join lifeapp.la_missions lam on lam.id = lamc.la_mission_id where lam.type = 5;
-    """
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute(sql)
+            # Get filter parameters from request
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            
+            # Build base query with proper JOINs
+            sql = """
+                SELECT count(*) as count 
+                FROM lifeapp.la_mission_completes lamc 
+                INNER JOIN lifeapp.la_missions lam ON lam.id = lamc.la_mission_id 
+                INNER JOIN lifeapp.users u ON u.id = lamc.user_id 
+                WHERE lam.type = 5
+            """
+            params = []
+            
+            # Add state filter
+            if filters.get('state') and filters['state'] != 'All':
+                sql += " AND u.state = %s"
+                params.append(filters['state'])
+            
+            # Add city filter
+            if filters.get('city') and filters['city'] != 'All':
+                sql += " AND u.city = %s"
+                params.append(filters['city'])
+            
+            # Add school code filter
+            if filters.get('school_code') and filters['school_code'] != 'All':
+                sql += " AND u.school_code = %s"
+                params.append(filters['school_code'])
+            
+            # Add user type filter
+            if filters.get('user_type') and filters['user_type'] != 'All':
+                type_map = {
+                    'Admin': 1,
+                    'Student': 3,
+                    'Mentor': 4,
+                    'Teacher': 5
+                }
+                if filters['user_type'] in type_map:
+                    sql += " AND u.type = %s"
+                    params.append(type_map[filters['user_type']])
+                elif filters['user_type'] == 'Unspecified':
+                    sql += " AND (u.type NOT IN (1,3,4,5) OR u.type IS NULL)"
+            
+            # Add grade filter
+            if filters.get('grade') and filters['grade'] != 'All':
+                grade_num = filters['grade'].replace('Grade ', '')
+                if grade_num.isdigit():
+                    sql += " AND u.grade = %s"
+                    params.append(int(grade_num))
+            
+            # Add gender filter
+            if filters.get('gender') and filters['gender'] != 'All':
+                gender_map = {'Male': 1, 'Female': 2}
+                if filters['gender'] in gender_map:
+                    sql += " AND u.gender = %s"
+                    params.append(gender_map[filters['gender']])
+            
+            # Add date range filter
+            if filters.get('date_range') and filters['date_range'] != 'All':
+                date_filter = filters['date_range']
+                if date_filter == 'last7days':
+                    sql += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                elif date_filter == 'last30days':
+                    sql += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+                elif date_filter == 'last3months':
+                    sql += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+                elif date_filter == 'last6months':
+                    sql += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
+                elif date_filter == 'lastyear':
+                    sql += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
+            
+            # Add custom date range filter
+            if filters.get('start_date') and filters.get('end_date'):
+                sql += " AND lamc.created_at BETWEEN %s AND %s"
+                params.extend([filters['start_date'], filters['end_date']])
+            
+            cursor.execute(sql, params)
             result = cursor.fetchall()  
         return jsonify(result), 200
     except Exception as e:
@@ -2123,13 +2674,87 @@ def get_total_jigyasa_completes() :
 
 @app.route('/api/total_pragya_completes', methods= ['POST'])
 def get_total_pragya_completes() :
-    sql  = """
-        select count(*) as count from lifeapp.la_mission_completes lamc inner join lifeapp.la_missions lam on lam.id = lamc.la_mission_id where lam.type = 6;
-    """
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute(sql)
+            # Get filter parameters from request
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            
+            # Build base query with proper JOINs
+            sql = """
+                SELECT count(*) as count 
+                FROM lifeapp.la_mission_completes lamc 
+                INNER JOIN lifeapp.la_missions lam ON lam.id = lamc.la_mission_id 
+                INNER JOIN lifeapp.users u ON u.id = lamc.user_id 
+                WHERE lam.type = 6
+            """
+            params = []
+            
+            # Add state filter
+            if filters.get('state') and filters['state'] != 'All':
+                sql += " AND u.state = %s"
+                params.append(filters['state'])
+            
+            # Add city filter
+            if filters.get('city') and filters['city'] != 'All':
+                sql += " AND u.city = %s"
+                params.append(filters['city'])
+            
+            # Add school code filter
+            if filters.get('school_code') and filters['school_code'] != 'All':
+                sql += " AND u.school_code = %s"
+                params.append(filters['school_code'])
+            
+            # Add user type filter
+            if filters.get('user_type') and filters['user_type'] != 'All':
+                type_map = {
+                    'Admin': 1,
+                    'Student': 3,
+                    'Mentor': 4,
+                    'Teacher': 5
+                }
+                if filters['user_type'] in type_map:
+                    sql += " AND u.type = %s"
+                    params.append(type_map[filters['user_type']])
+                elif filters['user_type'] == 'Unspecified':
+                    sql += " AND (u.type NOT IN (1,3,4,5) OR u.type IS NULL)"
+            
+            # Add grade filter
+            if filters.get('grade') and filters['grade'] != 'All':
+                grade_num = filters['grade'].replace('Grade ', '')
+                if grade_num.isdigit():
+                    sql += " AND u.grade = %s"
+                    params.append(int(grade_num))
+            
+            # Add gender filter
+            if filters.get('gender') and filters['gender'] != 'All':
+                gender_map = {'Male': 1, 'Female': 2}
+                if filters['gender'] in gender_map:
+                    sql += " AND u.gender = %s"
+                    params.append(gender_map[filters['gender']])
+            
+            # Add date range filter
+            if filters.get('date_range') and filters['date_range'] != 'All':
+                date_filter = filters['date_range']
+                if date_filter == 'last7days':
+                    sql += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                elif date_filter == 'last30days':
+                    sql += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+                elif date_filter == 'last3months':
+                    sql += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+                elif date_filter == 'last6months':
+                    sql += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
+                elif date_filter == 'lastyear':
+                    sql += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
+            
+            # Add custom date range filter
+            if filters.get('start_date') and filters.get('end_date'):
+                sql += " AND lamc.created_at BETWEEN %s AND %s"
+                params.extend([filters['start_date'], filters['end_date']])
+            
+            cursor.execute(sql, params)
             result = cursor.fetchall()  
         return jsonify(result), 200
     except Exception as e:
@@ -2138,14 +2763,79 @@ def get_total_pragya_completes() :
         connection.close()
 
 @app.route('/api/total_riddle_completes', methods= ['POST'])
-def get_total_riddle_completes() :
-    sql  = """
-        select count(*) as count from lifeapp.la_mission_completes lamc inner join lifeapp.la_missions lam on lam.id = lamc.la_mission_id where lam.type = 3;
-    """
+def get_total_riddle_completes():
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute(sql)
+            # Get filter parameters from request
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            
+            # Build base query with proper JOINs for riddle completions
+            # Riddles are tracked through la_quiz_game_results table with type filtering
+            sql = """
+                SELECT count(*) as count 
+                FROM lifeapp.la_quiz_game_results lqgr 
+                INNER JOIN lifeapp.la_quiz_games lqg ON lqg.id = lqgr.la_quiz_game_id 
+                INNER JOIN lifeapp.users u ON u.id = lqgr.user_id 
+                WHERE lqg.type = 3
+            """
+            params = []
+            
+            # Add state filter
+            if filters.get('state') and filters['state'] != 'All':
+                sql += " AND u.state = %s"
+                params.append(filters['state'])
+            
+            # Add city filter
+            if filters.get('city') and filters['city'] != 'All':
+                sql += " AND u.city = %s"
+                params.append(filters['city'])
+            
+            # Add school code filter
+            if filters.get('school_code') and filters['school_code'] != 'All':
+                sql += " AND u.school_code = %s"
+                params.append(filters['school_code'])
+            
+            # Add user type filter
+            if filters.get('user_type') and filters['user_type'] != 'All':
+                if filters['user_type'] == 'Student':
+                    sql += " AND u.type = 3"
+                elif filters['user_type'] == 'Teacher':
+                    sql += " AND u.type = 5"
+                elif filters['user_type'] == 'Mentor':
+                    sql += " AND u.type = 4"
+            
+            # Add grade filter
+            if filters.get('grade') and filters['grade'] != 'All':
+                sql += " AND u.grade = %s"
+                params.append(filters['grade'])
+            
+            # Add gender filter
+            if filters.get('gender') and filters['gender'] != 'All':
+                sql += " AND u.gender = %s"
+                params.append(filters['gender'])
+            
+            # Add date range filter
+            if filters.get('date_range') and filters['date_range'] != 'All':
+                if filters['date_range'] == 'last7days':
+                    sql += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                elif filters['date_range'] == 'last30days':
+                    sql += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+                elif filters['date_range'] == 'last3months':
+                    sql += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+                elif filters['date_range'] == 'last6months':
+                    sql += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
+                elif filters['date_range'] == 'lastyear':
+                    sql += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
+            
+            # Add custom date range filter
+            if filters.get('start_date') and filters.get('end_date'):
+                sql += " AND lqgr.created_at BETWEEN %s AND %s"
+                params.extend([filters['start_date'], filters['end_date']])
+            
+            cursor.execute(sql, params)
             result = cursor.fetchall()  
         return jsonify(result), 200
     except Exception as e:
@@ -2154,52 +2844,359 @@ def get_total_riddle_completes() :
         connection.close()
 
 @app.route('/api/total_puzzle_completes', methods= ['POST'])
-def get_total_puzzle_completes() :
-    sql  = """
-        select count(*) as count from lifeapp.la_mission_completes lamc inner join lifeapp.la_missions lam on lam.id = lamc.la_mission_id where lam.type = 4;
-    """
+def get_total_puzzle_completes():
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute(sql)
-            result = cursor.fetchall()  
-        return jsonify(result), 200
+            # Get filter parameters from request
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            
+            # Build base query with proper JOINs
+            sql = """
+                SELECT count(*) as count 
+                FROM lifeapp.la_mission_completes lamc 
+                INNER JOIN lifeapp.la_missions lam ON lam.id = lamc.la_mission_id 
+                INNER JOIN lifeapp.users u ON u.id = lamc.user_id 
+                WHERE lam.type = 4
+            """
+            params = []
+            
+            # Add state filter
+            if filters.get('state') and filters['state'] != 'All':
+                sql += " AND u.state = %s"
+                params.append(filters['state'])
+            
+            # Add city filter
+            if filters.get('city') and filters['city'] != 'All':
+                sql += " AND u.city = %s"
+                params.append(filters['city'])
+            
+            # Add school code filter
+            if filters.get('school_code') and filters['school_code'] != 'All':
+                # Convert to string and strip if not None/empty
+                school_code = filters['school_code']
+                if school_code is not None and str(school_code).strip():
+                    sql += " AND u.school_code = %s"
+                    params.append(str(school_code).strip())
+            
+            # Add user type filter
+            if filters.get('user_type') and filters['user_type'] != 'All':
+                sql += " AND u.type = %s"
+                params.append(filters['user_type'])
+            
+            # Add grade filter
+            if filters.get('grade') and filters['grade'] != 'All':
+                sql += " AND u.grade = %s"
+                params.append(filters['grade'])
+            
+            # Add gender filter
+            if filters.get('gender') and filters['gender'] != 'All':
+                sql += " AND u.gender = %s"
+                params.append(filters['gender'])
+            
+            # Add date range filter
+            if filters.get('date_range') and len(filters['date_range']) == 2:
+                start_date, end_date = filters['date_range']
+                if start_date and end_date:
+                    sql += " AND DATE(lamc.completion_date) BETWEEN %s AND %s"
+                    params.extend([start_date, end_date])
+            
+            cursor.execute(sql, params)
+            result = cursor.fetchall()
+            return jsonify(result), 200
+            
     except Exception as e:
+        logger.error(f"Error in get_total_puzzle_completes: {str(e)}")
         return jsonify({"error": str(e)}), 500
     finally:
-        connection.close()
+        if connection:
+            connection.close()
 
 @app.route('/api/total_quiz_completes', methods= ['POST'])
 def get_total_quiz_completes() :
-    sql = """
-        select count(*) as count from lifeapp.la_quiz_game_results;
-    """
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute(sql)
-            result = cursor.fetchone()['count']
-        return jsonify({'count': result}), 200
+            # Get filter parameters from request
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            
+            # Build base query with proper JOINs
+            sql = """
+                SELECT count(*) as count 
+                FROM lifeapp.la_quiz_game_results lqgr 
+                INNER JOIN lifeapp.la_quiz_games lqg ON lqg.id = lqgr.la_quiz_game_id
+                INNER JOIN lifeapp.users u ON u.id = lqgr.user_id 
+                WHERE lqg.type = 2 AND u.type = 3
+            """
+            params = []
+            
+            # Add state filter
+            if filters.get('state') and filters['state'] != 'All':
+                sql += " AND u.state = %s"
+                params.append(filters['state'])
+            
+            # Add city filter
+            if filters.get('city') and filters['city'] != 'All':
+                sql += " AND u.city = %s"
+                params.append(filters['city'])
+            
+            # Add school code filter
+            if filters.get('school_code') and filters['school_code'] != 'All':
+                sql += " AND u.school_code = %s"
+                params.append(filters['school_code'])
+            
+            # Add user type filter
+            if filters.get('user_type') and filters['user_type'] != 'All':
+                type_map = {
+                    'Admin': 1,
+                    'Student': 3,
+                    'Mentor': 4,
+                    'Teacher': 5
+                }
+                if filters['user_type'] in type_map:
+                    sql += " AND u.type = %s"
+                    params.append(type_map[filters['user_type']])
+                elif filters['user_type'] == 'Unspecified':
+                    sql += " AND (u.type NOT IN (1,3,4,5) OR u.type IS NULL)"
+            
+            # Add grade filter
+            if filters.get('grade') and filters['grade'] != 'All':
+                grade_num = filters['grade'].replace('Grade ', '')
+                if grade_num.isdigit():
+                    sql += " AND u.grade = %s"
+                    params.append(int(grade_num))
+            
+            # Add gender filter
+            if filters.get('gender') and filters['gender'] != 'All':
+                gender_map = {'Male': 1, 'Female': 2}
+                if filters['gender'] in gender_map:
+                    sql += " AND u.gender = %s"
+                    params.append(gender_map[filters['gender']])
+            
+            # Add date range filter
+            if filters.get('date_range') and filters['date_range'] != 'All':
+                date_filter = filters['date_range']
+                if date_filter == 'last7days':
+                    sql += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                elif date_filter == 'last30days':
+                    sql += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+                elif date_filter == 'last3months':
+                    sql += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+                elif date_filter == 'last6months':
+                    sql += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
+                elif date_filter == 'lastyear':
+                    sql += " AND lqgr.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
+            
+            # Add custom date range filter
+            if filters.get('start_date') and filters.get('end_date'):
+                sql += " AND lqgr.created_at BETWEEN %s AND %s"
+                params.extend([filters['start_date'], filters['end_date']])
+            
+            cursor.execute(sql, params)
+            result = cursor.fetchone()
+            count = result['count'] if result else 0
+        return jsonify({'count': count}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         connection.close()
     
-@app.route('/api/mission_participation_rate', methods=['POST'])
-def get_mission_participation_rate():
-    sql_total_students = """
-        SELECT COUNT(*) AS count FROM lifeapp.users WHERE `type` = 3;
-    """
-    sql_mission_complete = """
-        SELECT COUNT(DISTINCT lamc.user_id) AS count FROM lifeapp.la_mission_completes lamc inner join lifeapp.la_missions lam on lam.id = lamc.la_mission_id where lam.type = 1;
-    """
+@app.route('/api/total_vision_completes', methods= ['POST'])
+def get_total_vision_completes() :
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute(sql_total_students)
+            # Get filter parameters from request
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            
+            # Build base query with proper JOINs for both count and score
+            sql = """
+                SELECT 
+                    count(DISTINCT vqa.user_id) as count,
+                    COALESCE(SUM(vqa.score), 0) as total_score,
+                    COUNT(*) as total_vision_answers
+                FROM lifeapp.vision_question_answers vqa 
+                INNER JOIN lifeapp.users u ON u.id = vqa.user_id 
+                WHERE 1=1
+            """
+            params = []
+            
+            # Add state filter
+            if filters.get('state') and filters['state'] != 'All':
+                sql += " AND u.state = %s"
+                params.append(filters['state'])
+            
+            # Add city filter
+            if filters.get('city') and filters['city'] != 'All':
+                sql += " AND u.city = %s"
+                params.append(filters['city'])
+            
+            # Add school code filter
+            if filters.get('school_code') and filters['school_code'] != 'All':
+                # Convert to string and strip if not None/empty
+                school_code = filters['school_code']
+                if school_code is not None and str(school_code).strip():
+                    sql += " AND u.school_code = %s"
+                    params.append(str(school_code).strip())
+            
+            # Add user type filter
+            if filters.get('user_type') and filters['user_type'] != 'All':
+                type_map = {
+                    'Admin': 1,
+                    'Student': 3,
+                    'Mentor': 4,
+                    'Teacher': 5
+                }
+                if filters['user_type'] in type_map:
+                    sql += " AND u.type = %s"
+                    params.append(type_map[filters['user_type']])
+                elif filters['user_type'] == 'Unspecified':
+                    sql += " AND (u.type NOT IN (1,3,4,5) OR u.type IS NULL)"
+            
+            # Add grade filter
+            if filters.get('grade') and filters['grade'] != 'All':
+                grade_num = filters['grade'].replace('Grade ', '')
+                if grade_num.isdigit():
+                    sql += " AND u.grade = %s"
+                    params.append(int(grade_num))
+            
+            # Add gender filter
+            if filters.get('gender') and filters['gender'] != 'All':
+                gender_map = {'Male': 1, 'Female': 2}
+                if filters['gender'] in gender_map:
+                    sql += " AND u.gender = %s"
+                    params.append(gender_map[filters['gender']])
+            
+            # Add date range filter
+            if filters.get('date_range') and filters['date_range'] != 'All':
+                date_filter = filters['date_range']
+                if date_filter == 'last7days':
+                    sql += " AND vqa.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                elif date_filter == 'last30days':
+                    sql += " AND vqa.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+                elif date_filter == 'last3months':
+                    sql += " AND vqa.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+                elif date_filter == 'last6months':
+                    sql += " AND vqa.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
+                elif date_filter == 'lastyear':
+                    sql += " AND vqa.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
+            
+            # Add custom date range filter
+            if filters.get('start_date') and filters.get('end_date'):
+                sql += " AND vqa.created_at BETWEEN %s AND %s"
+                params.extend([filters['start_date'], filters['end_date']])
+            
+            cursor.execute(sql, params)
+            result = cursor.fetchone()
+            
+            return jsonify({
+                'count': result['count'] if result else 0,
+                'total_score': int(result['total_score']) if result else 0,
+                'total_vision_answers': result['total_vision_answers'] if result else 0
+            }), 200
+            
+    except Exception as e:
+        logger.error(f"Error in get_total_vision_completes: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if connection:
+            connection.close()
+
+@app.route('/api/mission_participation_rate', methods=['POST'])
+def get_mission_participation_rate():
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            # Get filter parameters from request
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            
+            # Build base query for total students with proper filtering
+            sql_total_students = """
+                SELECT COUNT(*) AS count 
+                FROM lifeapp.users u 
+                WHERE u.type = 3
+            """
+            params_total = []
+            
+            # Build base query for mission completions with proper JOINs and filtering
+            sql_mission_complete = """
+                SELECT COUNT(DISTINCT lamc.user_id) AS count 
+                FROM lifeapp.la_mission_completes lamc 
+                INNER JOIN lifeapp.la_missions lam ON lam.id = lamc.la_mission_id 
+                INNER JOIN lifeapp.users u ON u.id = lamc.user_id 
+                WHERE lam.type = 1 AND u.type = 3
+            """
+            params_mission = []
+            
+            # Apply demographic filters to both queries
+            # State filter
+            if filters.get('state') and filters['state'] != 'All':
+                sql_total_students += " AND u.state = %s"
+                sql_mission_complete += " AND u.state = %s"
+                params_total.append(filters['state'])
+                params_mission.append(filters['state'])
+            
+            # City filter
+            if filters.get('city') and filters['city'] != 'All':
+                sql_total_students += " AND u.city = %s"
+                sql_mission_complete += " AND u.city = %s"
+                params_total.append(filters['city'])
+                params_mission.append(filters['city'])
+            
+            # School code filter
+            if filters.get('school_code') and filters['school_code'] != 'All':
+                school_code = filters['school_code']
+                if school_code is not None and str(school_code).strip():
+                    sql_total_students += " AND u.school_code = %s"
+                    sql_mission_complete += " AND u.school_code = %s"
+                    params_total.append(str(school_code).strip())
+                    params_mission.append(str(school_code).strip())
+            
+            # Grade filter
+            if filters.get('grade') and filters['grade'] != 'All':
+                sql_total_students += " AND u.grade = %s"
+                sql_mission_complete += " AND u.grade = %s"
+                params_total.append(filters['grade'])
+                params_mission.append(filters['grade'])
+            
+            # Gender filter
+            if filters.get('gender') and filters['gender'] != 'All':
+                sql_total_students += " AND u.gender = %s"
+                sql_mission_complete += " AND u.gender = %s"
+                params_total.append(filters['gender'])
+                params_mission.append(filters['gender'])
+            
+            # Date range filter for completions only
+            if filters.get('date_range') and filters['date_range'] != 'All':
+                if filters['date_range'] == 'last7days':
+                    sql_mission_complete += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                elif filters['date_range'] == 'last30days':
+                    sql_mission_complete += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+                elif filters['date_range'] == 'last3months':
+                    sql_mission_complete += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+                elif filters['date_range'] == 'last6months':
+                    sql_mission_complete += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
+                elif filters['date_range'] == 'lastyear':
+                    sql_mission_complete += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
+            
+            # Custom date range filter for completions only
+            if filters.get('start_date') and filters.get('end_date'):
+                sql_mission_complete += " AND lamc.created_at BETWEEN %s AND %s"
+                params_mission.extend([filters['start_date'], filters['end_date']])
+            
+            # Execute queries
+            cursor.execute(sql_total_students, params_total)
             total_students = cursor.fetchone()['count']
 
-            cursor.execute(sql_mission_complete)
+            cursor.execute(sql_mission_complete, params_mission)
             mission_complete_user = cursor.fetchone()['count']
 
             participation_rate = (mission_complete_user / total_students) * 100 if total_students > 0 else 0
@@ -2212,19 +3209,93 @@ def get_mission_participation_rate():
 
 @app.route('/api/jigyasa_participation_rate', methods=['POST'])
 def get_jigyasa_participation_rate():
-    sql_total_students = """
-        SELECT COUNT(*) AS count FROM lifeapp.users WHERE `type` = 3;
-    """
-    sql_jigyasa_complete = """
-        SELECT COUNT(DISTINCT lamc.user_id) AS count FROM lifeapp.la_mission_completes lamc inner join lifeapp.la_missions lam on lam.id = lamc.la_mission_id where lam.type = 5;
-    """
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute(sql_total_students)
+            # Get filter parameters from request
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            
+            # Build base query for total students with proper filtering
+            sql_total_students = """
+                SELECT COUNT(*) AS count 
+                FROM lifeapp.users u 
+                WHERE u.type = 3
+            """
+            params_total = []
+            
+            # Build base query for jigyasa completions with proper JOINs and filtering
+            sql_jigyasa_complete = """
+                SELECT COUNT(DISTINCT lamc.user_id) AS count 
+                FROM lifeapp.la_mission_completes lamc 
+                INNER JOIN lifeapp.la_missions lam ON lam.id = lamc.la_mission_id 
+                INNER JOIN lifeapp.users u ON u.id = lamc.user_id 
+                WHERE lam.type = 5 AND u.type = 3
+            """
+            params_jigyasa = []
+            
+            # Apply demographic filters to both queries
+            # State filter
+            if filters.get('state') and filters['state'] != 'All':
+                sql_total_students += " AND u.state = %s"
+                sql_jigyasa_complete += " AND u.state = %s"
+                params_total.append(filters['state'])
+                params_jigyasa.append(filters['state'])
+            
+            # City filter
+            if filters.get('city') and filters['city'] != 'All':
+                sql_total_students += " AND u.city = %s"
+                sql_jigyasa_complete += " AND u.city = %s"
+                params_total.append(filters['city'])
+                params_jigyasa.append(filters['city'])
+            
+            # School code filter
+            if filters.get('school_code') and filters['school_code'] != 'All':
+                school_code = filters['school_code']
+                if school_code is not None and str(school_code).strip():
+                    sql_total_students += " AND u.school_code = %s"
+                    sql_jigyasa_complete += " AND u.school_code = %s"
+                    params_total.append(str(school_code).strip())
+                    params_jigyasa.append(str(school_code).strip())
+            
+            # Grade filter
+            if filters.get('grade') and filters['grade'] != 'All':
+                sql_total_students += " AND u.grade = %s"
+                sql_jigyasa_complete += " AND u.grade = %s"
+                params_total.append(filters['grade'])
+                params_jigyasa.append(filters['grade'])
+            
+            # Gender filter
+            if filters.get('gender') and filters['gender'] != 'All':
+                sql_total_students += " AND u.gender = %s"
+                sql_jigyasa_complete += " AND u.gender = %s"
+                params_total.append(filters['gender'])
+                params_jigyasa.append(filters['gender'])
+            
+            # Date range filter for completions only
+            if filters.get('date_range') and filters['date_range'] != 'All':
+                if filters['date_range'] == 'last7days':
+                    sql_jigyasa_complete += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                elif filters['date_range'] == 'last30days':
+                    sql_jigyasa_complete += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+                elif filters['date_range'] == 'last3months':
+                    sql_jigyasa_complete += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+                elif filters['date_range'] == 'last6months':
+                    sql_jigyasa_complete += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
+                elif filters['date_range'] == 'lastyear':
+                    sql_jigyasa_complete += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
+            
+            # Custom date range filter for completions only
+            if filters.get('start_date') and filters.get('end_date'):
+                sql_jigyasa_complete += " AND lamc.created_at BETWEEN %s AND %s"
+                params_jigyasa.extend([filters['start_date'], filters['end_date']])
+            
+            # Execute queries
+            cursor.execute(sql_total_students, params_total)
             total_students = cursor.fetchone()['count']
 
-            cursor.execute(sql_jigyasa_complete)
+            cursor.execute(sql_jigyasa_complete, params_jigyasa)
             jigyasa_complete_user = cursor.fetchone()['count']
 
             participation_rate = (jigyasa_complete_user / total_students) * 100 if total_students > 0 else 0
@@ -2237,19 +3308,93 @@ def get_jigyasa_participation_rate():
 
 @app.route('/api/pragya_participation_rate', methods=['POST'])
 def get_pragya_participation_rate():
-    sql_total_students = """
-        SELECT COUNT(*) AS count FROM lifeapp.users WHERE `type` = 3;
-    """
-    sql_pragya_complete = """
-        SELECT COUNT(DISTINCT lamc.user_id) AS count FROM lifeapp.la_mission_completes lamc inner join lifeapp.la_missions lam on lam.id = lamc.la_mission_id where lam.type = 6;
-    """
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute(sql_total_students)
+            # Get filter parameters from request
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            
+            # Build base query for total students with proper filtering
+            sql_total_students = """
+                SELECT COUNT(*) AS count 
+                FROM lifeapp.users u 
+                WHERE u.type = 3
+            """
+            params_total = []
+            
+            # Build base query for pragya completions with proper JOINs and filtering
+            sql_pragya_complete = """
+                SELECT COUNT(DISTINCT lamc.user_id) AS count 
+                FROM lifeapp.la_mission_completes lamc 
+                INNER JOIN lifeapp.la_missions lam ON lam.id = lamc.la_mission_id 
+                INNER JOIN lifeapp.users u ON u.id = lamc.user_id 
+                WHERE lam.type = 6 AND u.type = 3
+            """
+            params_pragya = []
+            
+            # Apply demographic filters to both queries
+            # State filter
+            if filters.get('state') and filters['state'] != 'All':
+                sql_total_students += " AND u.state = %s"
+                sql_pragya_complete += " AND u.state = %s"
+                params_total.append(filters['state'])
+                params_pragya.append(filters['state'])
+            
+            # City filter
+            if filters.get('city') and filters['city'] != 'All':
+                sql_total_students += " AND u.city = %s"
+                sql_pragya_complete += " AND u.city = %s"
+                params_total.append(filters['city'])
+                params_pragya.append(filters['city'])
+            
+            # School code filter
+            if filters.get('school_code') and filters['school_code'] != 'All':
+                school_code = filters['school_code']
+                if school_code is not None and str(school_code).strip():
+                    sql_total_students += " AND u.school_code = %s"
+                    sql_pragya_complete += " AND u.school_code = %s"
+                    params_total.append(str(school_code).strip())
+                    params_pragya.append(str(school_code).strip())
+            
+            # Grade filter
+            if filters.get('grade') and filters['grade'] != 'All':
+                sql_total_students += " AND u.grade = %s"
+                sql_pragya_complete += " AND u.grade = %s"
+                params_total.append(filters['grade'])
+                params_pragya.append(filters['grade'])
+            
+            # Gender filter
+            if filters.get('gender') and filters['gender'] != 'All':
+                sql_total_students += " AND u.gender = %s"
+                sql_pragya_complete += " AND u.gender = %s"
+                params_total.append(filters['gender'])
+                params_pragya.append(filters['gender'])
+            
+            # Date range filter for completions only (doesn't apply to total students)
+            if filters.get('date_range') and filters['date_range'] != 'All':
+                if filters['date_range'] == 'last7days':
+                    sql_pragya_complete += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                elif filters['date_range'] == 'last30days':
+                    sql_pragya_complete += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+                elif filters['date_range'] == 'last3months':
+                    sql_pragya_complete += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+                elif filters['date_range'] == 'last6months':
+                    sql_pragya_complete += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
+                elif filters['date_range'] == 'lastyear':
+                    sql_pragya_complete += " AND lamc.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
+            
+            # Custom date range filter for completions only
+            if filters.get('start_date') and filters.get('end_date'):
+                sql_pragya_complete += " AND lamc.created_at BETWEEN %s AND %s"
+                params_pragya.extend([filters['start_date'], filters['end_date']])
+            
+            # Execute queries
+            cursor.execute(sql_total_students, params_total)
             total_students = cursor.fetchone()['count']
 
-            cursor.execute(sql_pragya_complete)
+            cursor.execute(sql_pragya_complete, params_pragya)
             pragya_complete_user = cursor.fetchone()['count']
 
             participation_rate = (pragya_complete_user / total_students) * 100 if total_students > 0 else 0
@@ -2262,19 +3407,93 @@ def get_pragya_participation_rate():
 
 @app.route('/api/quiz_participation_rate', methods=['POST'])
 def get_quiz_participation_rate():
-    sql_total_students = """
-        SELECT COUNT(*) AS count FROM lifeapp.users WHERE `type` = 3;
-    """
-    sql_quiz_complete = """
-        select count(distinct user_id) as count from lifeapp.la_quiz_game_results;
-    """
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute(sql_total_students)
+            # Get filter parameters from request
+            filters = {}
+            if request.method == 'POST':
+                filters = request.get_json() or {}
+            
+            # Build base query for total students with proper filtering
+            sql_total_students = """
+                SELECT COUNT(*) AS count 
+                FROM lifeapp.users u 
+                WHERE u.type = 3
+            """
+            params_total = []
+            
+            # Build base query for quiz completions with proper JOINs and filtering
+            sql_quiz_complete = """
+                SELECT COUNT(DISTINCT laqgr.user_id) AS count 
+                FROM lifeapp.la_quiz_game_results laqgr 
+                INNER JOIN lifeapp.la_quiz_games laqg ON laqg.id = laqgr.la_quiz_game_id
+                INNER JOIN lifeapp.users u ON u.id = laqgr.user_id 
+                WHERE laqg.type = 2 AND u.type = 3
+            """
+            params_quiz = []
+            
+            # Apply demographic filters to both queries
+            # State filter
+            if filters.get('state') and filters['state'] != 'All':
+                sql_total_students += " AND u.state = %s"
+                sql_quiz_complete += " AND u.state = %s"
+                params_total.append(filters['state'])
+                params_quiz.append(filters['state'])
+            
+            # City filter
+            if filters.get('city') and filters['city'] != 'All':
+                sql_total_students += " AND u.city = %s"
+                sql_quiz_complete += " AND u.city = %s"
+                params_total.append(filters['city'])
+                params_quiz.append(filters['city'])
+            
+            # School code filter
+            if filters.get('school_code') and filters['school_code'] != 'All':
+                school_code = filters['school_code']
+                if school_code is not None and str(school_code).strip():
+                    sql_total_students += " AND u.school_code = %s"
+                    sql_quiz_complete += " AND u.school_code = %s"
+                    params_total.append(str(school_code).strip())
+                    params_quiz.append(str(school_code).strip())
+            
+            # Grade filter
+            if filters.get('grade') and filters['grade'] != 'All':
+                sql_total_students += " AND u.grade = %s"
+                sql_quiz_complete += " AND u.grade = %s"
+                params_total.append(filters['grade'])
+                params_quiz.append(filters['grade'])
+            
+            # Gender filter
+            if filters.get('gender') and filters['gender'] != 'All':
+                sql_total_students += " AND u.gender = %s"
+                sql_quiz_complete += " AND u.gender = %s"
+                params_total.append(filters['gender'])
+                params_quiz.append(filters['gender'])
+            
+            # Date range filter for completions only
+            if filters.get('date_range') and filters['date_range'] != 'All':
+                if filters['date_range'] == 'last7days':
+                    sql_quiz_complete += " AND laqgr.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                elif filters['date_range'] == 'last30days':
+                    sql_quiz_complete += " AND laqgr.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+                elif filters['date_range'] == 'last3months':
+                    sql_quiz_complete += " AND laqgr.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)"
+                elif filters['date_range'] == 'last6months':
+                    sql_quiz_complete += " AND laqgr.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
+                elif filters['date_range'] == 'lastyear':
+                    sql_quiz_complete += " AND laqgr.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)"
+            
+            # Custom date range filter for completions only
+            if filters.get('start_date') and filters.get('end_date'):
+                sql_quiz_complete += " AND laqgr.created_at BETWEEN %s AND %s"
+                params_quiz.extend([filters['start_date'], filters['end_date']])
+            
+            # Execute queries
+            cursor.execute(sql_total_students, params_total)
             total_students = cursor.fetchone()['count']
 
-            cursor.execute(sql_quiz_complete)
+            cursor.execute(sql_quiz_complete, params_quiz)
             quiz_complete_user = cursor.fetchone()['count']
 
             participation_rate = (quiz_complete_user / total_students) * 100 if total_students > 0 else 0
@@ -2736,7 +3955,7 @@ def vision_teacher_completions_summary():
 
     finally:
         conn.close()
-         
+   
 
 ###################################################################################
 ###################################################################################
@@ -13249,7 +14468,7 @@ def list_campaigns():
 def create_campaign():
     logger.info("📥 [POST] Create campaign")
 
-    conn = None
+    conn = get_db_connection()
     try:
         if request.content_type.startswith("application/json"):
             data = request.get_json()
@@ -13838,5 +15057,4 @@ def handle_mentor_session_details(conn, cursor, session_participant_id):
         }
 
 if __name__ == '__main__':
-    app.run(debug=True,  use_reloader=True)
-
+    app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=True)
