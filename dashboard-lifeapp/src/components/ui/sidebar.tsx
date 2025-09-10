@@ -94,6 +94,49 @@ const NavItem = ({
   );
 };
 
+/* ----------  NEW: tiny hooks & toggle component  ---------- */
+const useDbMode = () => {
+  const [mode, setMode] = useState<"prod" | "staging">("prod");
+  useEffect(() => {
+    fetch("/api/db-mode")
+      .then((r) => r.json())
+      .then((d) => setMode(d.mode))
+      .catch(() => {});
+  }, []);
+  return mode;
+};
+
+const DbToggle = () => {
+  const mode = useDbMode();
+  const [loading, setLoading] = useState(false);
+  const toggle = async () => {
+    setLoading(true);
+    await fetch("/api/toggle-db", { method: "POST" });
+    window.location.reload(); // fresh data from new DB
+  };
+  return (
+    <div className="px-4 pb-3">
+      <button
+        onClick={toggle}
+        disabled={loading}
+        className={cn(
+          "w-full flex items-center justify-between rounded-md px-3 py-2 text-sm transition",
+          mode === "prod"
+            ? "bg-emerald-500/20 text-emerald-400"
+            : "bg-orange-500/20 text-orange-400"
+        )}
+      >
+        <span className="flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-current" />
+          <span>{mode === "prod" ? "Production" : "Staging"}</span>
+        </span>
+        <span className="text-xs underline">switch</span>
+      </button>
+    </div>
+  );
+};
+/* ----------  END NEW  ---------- */
+
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -111,7 +154,6 @@ export function Sidebar() {
 
   useEffect(() => {
     const newOpenSections = { ...openSections };
-
     if (pathname.startsWith("/students")) newOpenSections.students = true;
     if (pathname.startsWith("/teachers")) {
       newOpenSections.teachers = true;
@@ -133,23 +175,16 @@ export function Sidebar() {
       newOpenSections.resources = true;
       newOpenSections.student_related = true;
     }
-
     setOpenSections(newOpenSections);
   }, [pathname]);
 
   const toggleSection = (section: keyof typeof openSections) => {
-    setOpenSections((prev) => ({
-      ...prev,
-      [section]: !prev[section],
-    }));
+    setOpenSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
 
   const handleLogout = async () => {
     try {
-      await fetch("/api/logout", {
-        method: "POST",
-        credentials: "include",
-      });
+      await fetch("/api/logout", { method: "POST", credentials: "include" });
       router.push("/login");
     } catch (error) {
       console.error("Logout failed", error);
@@ -411,14 +446,18 @@ export function Sidebar() {
         </nav>
       </div>
 
-      <div className="p-4 border-t border-gray-800">
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-2 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800/50 hover:text-white w-full text-left"
-        >
-          <IconLogout className="h-3 w-3" />
-          <span>Logout</span>
-        </button>
+      {/* ----------  NEW TOGGLE + OLD LOGOUT  ---------- */}
+      <div className="border-t border-gray-800">
+        <DbToggle />
+        <div className="p-4">
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800/50 hover:text-white w-full text-left"
+          >
+            <IconLogout className="h-3 w-3" />
+            <span>Logout</span>
+          </button>
+        </div>
       </div>
     </div>
   );
