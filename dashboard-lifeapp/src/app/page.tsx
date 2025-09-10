@@ -106,7 +106,7 @@ const inter = Inter({ subsets: ["latin"] });
 //const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
 // const api_startpoint = 'http://152.42.239.141:5000'
 const api_startpoint = 'http://152.42.239.141:5000'
-// const api_startpoint = "http://127.0.0.1:5000";
+// const api_startpoint = "http://localhost:5000";
 // const api_startpoint = 'https://abcd-12-34-56-78.ngrok-free.app'
 
 interface userTypeChart {
@@ -240,6 +240,73 @@ const pragyaGroupings = [
   "lifetime",
 ];
 
+// Skeleton Components for Loading States
+const MetricCardSkeleton = () => (
+  <div className="card shadow-sm border-0 h-100">
+    <div className="card-body text-center">
+      <div className="bg-gray-200 rounded-full w-16 h-16 mx-auto mb-3 animate-pulse"></div>
+      <div className="bg-gray-200 rounded h-4 w-3/4 mx-auto mb-2 animate-pulse"></div>
+      <div className="bg-gray-200 rounded h-6 w-1/2 mx-auto animate-pulse"></div>
+    </div>
+  </div>
+);
+
+const ChartSkeleton = () => (
+  <div className="card shadow-sm border-0 h-100">
+    <div className="card-header bg-transparent py-3">
+      <div className="bg-gray-200 rounded h-5 w-1/2 animate-pulse"></div>
+    </div>
+    <div className="card-body">
+      <div className="bg-gray-200 rounded h-80 w-full animate-pulse"></div>
+    </div>
+  </div>
+);
+
+// Lazy Chart Component with Intersection Observer
+const LazyChart = ({
+  option,
+  style,
+  loading,
+  id = `chart-${Math.random().toString(36).substr(2, 9)}`,
+}: {
+  option: any;
+  style?: React.CSSProperties;
+  loading: boolean;
+  id?: string;
+}) => {
+  const [isVisible, setIsVisible] = useState(false);
+  const [hasBeenVisible, setHasBeenVisible] = useState(false);
+  const chartRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !hasBeenVisible) {
+          setIsVisible(true);
+          setHasBeenVisible(true);
+        }
+      },
+      { threshold: 0.1, rootMargin: "50px" }
+    );
+
+    if (chartRef.current) {
+      observer.observe(chartRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, [hasBeenVisible]);
+
+  return (
+    <div ref={chartRef} id={id}>
+      {loading || !isVisible ? (
+        <ChartSkeleton />
+      ) : (
+        <ReactECharts option={option} style={style} />
+      )}
+    </div>
+  );
+};
+
 export default function UserAnalyticsDashboard() {
   const router = useRouter();
 
@@ -283,26 +350,53 @@ export default function UserAnalyticsDashboard() {
     "All",
   ]);
 
+  // Debounced filters to prevent excessive API calls
+  const [debouncedFilters, setDebouncedFilters] = useState(globalFilters);
+  const filterTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Debounce filter changes
+  useEffect(() => {
+    if (filterTimeoutRef.current) {
+      clearTimeout(filterTimeoutRef.current);
+    }
+
+    filterTimeoutRef.current = setTimeout(() => {
+      setDebouncedFilters(globalFilters);
+    }, 300); // 300ms debounce
+
+    return () => {
+      if (filterTimeoutRef.current) {
+        clearTimeout(filterTimeoutRef.current);
+      }
+    };
+  }, [globalFilters]);
+
+  // Progressive loading states
+  const [loadingPhase1, setLoadingPhase1] = useState(true); // Essential metrics
+  const [loadingPhase2, setLoadingPhase2] = useState(true); // Charts
+  const [loadingPhase3, setLoadingPhase3] = useState(true); // Detailed analytics
+  const [globalLoading, setGlobalLoading] = useState(true);
+
   // Helper function to build filter parameters
-  const buildFilterParams = () => {
+  const buildFilterParams = (filters = debouncedFilters) => {
     const filterParams: any = {};
-    if (globalFilters.state !== "All") {
-      filterParams.state = globalFilters.state;
+    if (filters.state !== "All") {
+      filterParams.state = filters.state;
     }
-    if (globalFilters.city !== "All") {
-      filterParams.city = globalFilters.city;
+    if (filters.city !== "All") {
+      filterParams.city = filters.city;
     }
-    if (globalFilters.schoolCode && globalFilters.schoolCode.trim() !== "") {
-      filterParams.school_code = globalFilters.schoolCode.trim();
+    if (filters.schoolCode && filters.schoolCode.trim() !== "") {
+      filterParams.school_code = filters.schoolCode.trim();
     }
-    if (globalFilters.userType !== "All") {
-      filterParams.user_type = globalFilters.userType;
+    if (filters.userType !== "All") {
+      filterParams.user_type = filters.userType;
     }
-    if (globalFilters.grade !== "All") {
-      filterParams.grade = globalFilters.grade;
+    if (filters.grade !== "All") {
+      filterParams.grade = filters.grade;
     }
-    if (globalFilters.gender !== "All") {
-      filterParams.gender = globalFilters.gender;
+    if (filters.gender !== "All") {
+      filterParams.gender = filters.gender;
     }
 
     // Handle date range - prioritize custom dates over predefined ranges
@@ -314,6 +408,451 @@ export default function UserAnalyticsDashboard() {
     }
 
     return filterParams;
+  };
+
+  // Parallel loading functions for better performance
+  const loadEssentialMetrics = async (filters = debouncedFilters) => {
+    setLoadingPhase1(true);
+    const filterParams = buildFilterParams(filters);
+
+    try {
+      // Phase 1: Essential metrics loaded in parallel
+      const [
+        userCountRes,
+        activeUserCountRes,
+        schoolCountRes,
+        teacherCountRes,
+        totalStudentCountRes,
+      ] = await Promise.all([
+        fetch(`${api_startpoint}/api/user-count`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/active-user-count`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/school_count`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/teacher-count`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/total-student-count`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+      ]);
+
+      // Process responses in parallel
+      const [
+        userCountData,
+        activeUserCountData,
+        schoolCountData,
+        teacherCountData,
+        totalStudentCountData,
+      ] = await Promise.all([
+        userCountRes.json(),
+        activeUserCountRes.json(),
+        schoolCountRes.json(),
+        teacherCountRes.json(),
+        totalStudentCountRes.json(),
+      ]);
+
+      // Update states
+      console.log("API Response Data:", {
+        userCount: userCountData,
+        activeUserCount: activeUserCountData,
+        schoolCount: schoolCountData,
+        teacherCount: teacherCountData,
+        totalStudentCount: totalStudentCountData,
+      });
+
+      setTotalUsers(userCountData[0]?.count || 0);
+      setActiveUsers(activeUserCountData[0]?.active_users || 0);
+      setSchoolCount(schoolCountData[0]?.count || 0);
+      setTotalTeachers(teacherCountData[0]?.total_count || 0);
+      setTotalStudents(totalStudentCountData[0]?.count || 0);
+    } catch (error) {
+      console.error("Error loading essential metrics:", error);
+    } finally {
+      setLoadingPhase1(false);
+    }
+  };
+
+  const loadPrimaryCharts = async (filters = debouncedFilters) => {
+    setLoadingPhase2(true);
+    const filterParams = buildFilterParams(filters);
+
+    try {
+      // Phase 2: Primary charts loaded in parallel
+      const [signupDataRes, userTypeDataRes, stateCountsRes, couponRedeemRes] =
+        await Promise.all([
+          fetch(`${api_startpoint}/api/signing-user`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(filterParams),
+          }),
+          fetch(`${api_startpoint}/api/user-type-chart`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(filterParams),
+          }),
+          fetch(`${api_startpoint}/api/count-school-state`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(filterParams),
+          }),
+          fetch(`${api_startpoint}/api/coupons-used-count`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(filterParams),
+          }),
+        ]);
+
+      // Process responses in parallel
+      const [signupData, userTypeData, stateCountsData, couponRedeemData] =
+        await Promise.all([
+          signupDataRes.json(),
+          userTypeDataRes.json(),
+          stateCountsRes.json(),
+          couponRedeemRes.json(),
+        ]);
+
+      // Update states
+      // Transform signup data from /api/signing-user
+      if (signupData) {
+        const groupedData: { [period: string]: EchartSignup } = {};
+        const dataArray = signupData.data || signupData;
+
+        if (Array.isArray(dataArray)) {
+          (dataArray as ApiSignupData[]).forEach((row) => {
+            const period = row.period || "Unknown";
+            if (!groupedData[period]) {
+              groupedData[period] = { period };
+            }
+            groupedData[period][row.user_type] = row.count;
+          });
+          setEChartData(Object.values(groupedData));
+        } else {
+          setEChartData([]);
+        }
+      } else {
+        setEChartData([]);
+      }
+
+      setUserTypeData(userTypeData || []);
+      setStateCounts(stateCountsData || []);
+      setCouponRedeemCount(couponRedeemData || []);
+    } catch (error) {
+      console.error("Error loading primary charts:", error);
+    } finally {
+      setLoadingPhase2(false);
+    }
+  };
+
+  const loadDetailedAnalytics = async (filters = debouncedFilters) => {
+    setLoadingPhase3(true);
+    const filterParams = buildFilterParams(filters);
+
+    try {
+      // Phase 3: Detailed analytics loaded in parallel
+      const [newSignupsRes, approvalRateRes, teacherGradeRes, studentGradeRes] =
+        await Promise.all([
+          fetch(
+            `${api_startpoint}/api/new-signups?${new URLSearchParams(
+              filterParams
+            )}`
+          ),
+          fetch(
+            `${api_startpoint}/api/approval-rate?${new URLSearchParams(
+              filterParams
+            )}`
+          ),
+          fetch(`${api_startpoint}/api/teachers-by-grade-over-time`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              grouping: groupingTeacherGrade,
+              ...filterParams,
+            }),
+          }),
+          fetch(`${api_startpoint}/api/students-by-grade-over-time`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ grouping: groupingGrade, ...filterParams }),
+          }),
+        ]);
+
+      // Process responses in parallel
+      const [
+        newSignupsData,
+        approvalRateData,
+        teacherGradeData,
+        studentGradeData,
+      ] = await Promise.all([
+        newSignupsRes.json(),
+        approvalRateRes.json(),
+        teacherGradeRes.json(),
+        studentGradeRes.json(),
+      ]);
+
+      // Update states
+      setNewSignups(newSignupsData[0]?.count || 0);
+      setApprovalRate(approvalRateData[0]?.rate || 0);
+      setEchartDataTeacherGrade(teacherGradeData || []);
+      setEchartDataGrade(studentGradeData || []);
+    } catch (error) {
+      console.error("Error loading detailed analytics:", error);
+    } finally {
+      setLoadingPhase3(false);
+    }
+  };
+
+  const loadAdditionalMetrics = async (filters = debouncedFilters) => {
+    const filterParams = buildFilterParams(filters);
+
+    try {
+      // Phase 4: Additional metrics loaded in parallel
+      const [
+        quizCompletesRes,
+        tmcTotalRes,
+        tjcTotalRes,
+        tpcTotalRes,
+        tqcTotalRes,
+        trcTotalRes,
+        tpzcTotalRes,
+        sessionParticipantTotalRes,
+        mentorsParticipatedSessionsTotalRes,
+        totalSessionsCreatedRes,
+        totalCountPBLRes,
+        visionSummaryRes,
+        missionParticipationRateRes,
+        jigyasaParticipationRateRes,
+        pragyaParticipationRateRes,
+        quizParticipationRateRes,
+        tmcAssignedByTeacherRes,
+        totalPointsEarnedRes,
+        totalPointsRedeemedRes,
+      ] = await Promise.all([
+        fetch(`${api_startpoint}/api/quiz_completes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/total_missions_completes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/total_jigyasa_completes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/total_pragya_completes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/total_quiz_completes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/total_riddle_completes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/total_puzzle_completes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/session_participants_total`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/mentor_participated_in_sessions_total`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/total_sessions_created`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(
+          `${api_startpoint}/api/PBLsubmissions/total?${new URLSearchParams(
+            filterParams
+          )}`
+        ),
+        fetch(`${api_startpoint}/api/total_vision_completes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/mission_participation_rate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/jigyasa_participation_rate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/pragya_participation_rate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/quiz_participation_rate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(
+          `${api_startpoint}/api/total-missions-completed-assigned-by-teacher`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(filterParams),
+          }
+        ),
+        fetch(`${api_startpoint}/api/total-points-earned`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+        fetch(`${api_startpoint}/api/total-points-redeemed`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filterParams),
+        }),
+      ]);
+
+      // Process responses in parallel
+      const [
+        quizCompletesData,
+        tmcTotalData,
+        tjcTotalData,
+        tpcTotalData,
+        tqcTotalData,
+        trcTotalData,
+        tpzcTotalData,
+        sessionParticipantTotalData,
+        mentorsParticipatedSessionsTotalData,
+        totalSessionsCreatedData,
+        totalCountPBLData,
+        visionSummaryData,
+        missionParticipationRateData,
+        jigyasaParticipationRateData,
+        pragyaParticipationRateData,
+        quizParticipationRateData,
+        tmcAssignedByTeacherData,
+        totalPointsEarnedData,
+        totalPointsRedeemedData,
+      ] = await Promise.all([
+        quizCompletesRes.json(),
+        tmcTotalRes.json(),
+        tjcTotalRes.json(),
+        tpcTotalRes.json(),
+        tqcTotalRes.json(),
+        trcTotalRes.json(),
+        tpzcTotalRes.json(),
+        sessionParticipantTotalRes.json(),
+        mentorsParticipatedSessionsTotalRes.json(),
+        totalSessionsCreatedRes.json(),
+        totalCountPBLRes.json(),
+        visionSummaryRes.json(),
+        missionParticipationRateRes.json(),
+        jigyasaParticipationRateRes.json(),
+        pragyaParticipationRateRes.json(),
+        quizParticipationRateRes.json(),
+        tmcAssignedByTeacherRes.json(),
+        totalPointsEarnedRes.json(),
+        totalPointsRedeemedRes.json(),
+      ]);
+
+      // Update states
+      setQuizCompletes(quizCompletesData[0]?.count || 0);
+      setTmcTotal(tmcTotalData[0]?.count || 0);
+      setTjcTotal(tjcTotalData[0]?.count || 0);
+      setTpcTotal(tpcTotalData[0]?.count || 0);
+      setTqcTotal(tqcTotalData.count || 0); // Note: Different response structure
+      setTrcTotal(trcTotalData[0]?.count || 0);
+      setTpzcTotal(tpzcTotalData[0]?.count || 0);
+      setSessionParticipantTotal(sessionParticipantTotalData[0]?.count || 0);
+      setMentorsParticipatedSessionsTotal(
+        mentorsParticipatedSessionsTotalData[0]?.count || 0
+      );
+      setTotalSessionsCreated(totalSessionsCreatedData[0]?.count || 0);
+      setTotalCountPBL(totalCountPBLData.total || 0);
+      setTotalVisionScore(visionSummaryData.total_score || 0);
+      setTotalVisionSubmitted(visionSummaryData.total_vision_answers || 0);
+      setMissionParticipationRate(
+        missionParticipationRateData.participation_rate || 0
+      );
+      setJigyasaParticipationRate(
+        jigyasaParticipationRateData.participation_rate || 0
+      );
+      setPragyaParticipationRate(
+        pragyaParticipationRateData.participation_rate || 0
+      );
+      setQuizParticipationRate(
+        quizParticipationRateData.participation_rate || 0
+      );
+      setTmcAssignedByTeacher(tmcAssignedByTeacherData[0]?.count || 0);
+
+      // Update coins earned and redeemed
+      if (
+        totalPointsEarnedData &&
+        typeof totalPointsEarnedData.total_points === "string"
+      ) {
+        setTotalPointsEarned(parseInt(totalPointsEarnedData.total_points));
+      } else {
+        setTotalPointsEarned(0);
+      }
+
+      if (totalPointsRedeemedData && totalPointsRedeemedData.length > 0) {
+        const value = totalPointsRedeemedData[0].total_coins_redeemed || 0;
+        setTotalPointsRedeemed(Number(value));
+      } else {
+        setTotalPointsRedeemed(0);
+      }
+    } catch (error) {
+      console.error("Error loading additional metrics:", error);
+    }
+  };
+
+  // Parallel loading orchestrator for maximum speed
+  const loadDashboardData = async () => {
+    setGlobalLoading(true);
+
+    // Load all phases in parallel for maximum performance
+    try {
+      await Promise.all([
+        loadEssentialMetrics(debouncedFilters),
+        loadPrimaryCharts(debouncedFilters),
+        loadDetailedAnalytics(debouncedFilters),
+        loadAdditionalMetrics(debouncedFilters),
+      ]);
+    } catch (error) {
+      console.error("Error loading dashboard data:", error);
+    } finally {
+      setGlobalLoading(false);
+    }
   };
 
   // Export all dashboard data to Excel with multiple sheets
@@ -354,7 +893,7 @@ export default function UserAnalyticsDashboard() {
         { name: "Total No. of Quiz Completes", value: quizCompletes || 0 },
         {
           name: "Total Sessions Created by Mentors",
-          value: sessions?.length || 0,
+          value: totalSessionsCreated || 0,
         },
         {
           name: "Total Participants Joined Mentor Sessions",
@@ -586,7 +1125,7 @@ export default function UserAnalyticsDashboard() {
         ["Total Coins Redeemed:", totalPointsRedeemed || 0],
         ["Total No. of Schools:", schoolCount || 0],
         ["Total No. of Quiz Completes:", quizCompletes || 0],
-        ["Total Sessions Created by Mentors:", sessions?.length || 0],
+        ["Total Sessions Created by Mentors:", totalSessionsCreated || 0],
         [
           "Total Participants Joined Mentor Sessions:",
           sessionParticipantTotal || 0,
@@ -809,6 +1348,62 @@ export default function UserAnalyticsDashboard() {
         );
       }
 
+      // Export PBL Submissions Data to separate sheet
+      if (dataPBL && dataPBL.length > 0) {
+        const pblSubmissionsData = dataPBL.map((item) => ({
+          Period: item.period,
+          Count: item.count,
+          Grouping: groupingPBL,
+          Status_Filter: statusPBL,
+        }));
+        const pblSheet = XLSX.utils.json_to_sheet(pblSubmissionsData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          pblSheet,
+          "PBL Submissions Over Time"
+        );
+      }
+
+      // Export Gender Distribution Data to separate sheet
+      if (EchartDataGender && EchartDataGender.length > 0) {
+        const genderSheet = XLSX.utils.json_to_sheet(EchartDataGender);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          genderSheet,
+          "Gender Distribution"
+        );
+      }
+
+      // Export Pragya Coins Earned Data to separate sheet
+      if (pointsPragyaData && pointsPragyaData.length > 0) {
+        const pragyaCoinsSheet = XLSX.utils.json_to_sheet(pointsPragyaData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          pragyaCoinsSheet,
+          "Pragya Coins Earned Over Time"
+        );
+      }
+
+      // Export Vision Score Over Time Data to separate sheet
+      if (VisionScore && VisionScore.length > 0) {
+        const visionScoreSheet = XLSX.utils.json_to_sheet(VisionScore);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          visionScoreSheet,
+          "Vision Score Over Time"
+        );
+      }
+
+      // Export Schools Demographics Distribution Over Time to separate sheet
+      if (schoolData && schoolData.length > 0) {
+        const schoolDemographicsSheet = XLSX.utils.json_to_sheet(schoolData);
+        XLSX.utils.book_append_sheet(
+          workbook,
+          schoolDemographicsSheet,
+          "Schools Demographics Over Time"
+        );
+      }
+
       // Export Student Detailed Data if available
       if (studentData && studentData.length > 0) {
         const studentSheet = XLSX.utils.json_to_sheet(studentData);
@@ -992,11 +1587,10 @@ export default function UserAnalyticsDashboard() {
   useEffect(() => {
     setLoading(true);
 
-    // Build filter parameters
+    // Simplified filter parameters - only grouping and user_type
     const filterParams: any = {
       grouping: grouping,
       user_type: selectedUserType,
-      ...buildFilterParams(),
     };
 
     fetch(`${api_startpoint}/api/signing-user`, {
@@ -1043,7 +1637,7 @@ export default function UserAnalyticsDashboard() {
         setEChartData([]); // Ensure it's never undefined
         setLoading(false);
       });
-  }, [grouping, selectedUserType, globalFilters]);
+  }, [grouping, selectedUserType]);
 
   // const [selectedUserType, setSelectedUserType] = useState('All');
   // Build an array of series for each user type.
@@ -1291,92 +1885,21 @@ export default function UserAnalyticsDashboard() {
 
   // Fetch additional metrics (totalUsers, activeUsers, approvalRate)
   const [totalUsers, setTotalUsers] = useState<number>(0);
-  useEffect(() => {
-    async function fetchUserCount() {
-      try {
-        const res = await fetch(`${api_startpoint}/api/user-count`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildFilterParams()),
-        });
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setTotalUsers(data[0].count);
-        }
-      } catch (error) {
-        console.error("Error fetching user count:", error);
-      }
-    }
-    fetchUserCount();
-  }, [globalFilters]);
-
   const [activeUsers, setActiveUsers] = useState<number>(0);
-  useEffect(() => {
-    async function fetchActiveUserCount() {
-      try {
-        const res = await fetch(`${api_startpoint}/api/active-user-count`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildFilterParams()),
-        });
-        const data = await res.json();
-        if (data && data.length > 0 && data[0].active_users !== undefined) {
-          setActiveUsers(data[0].active_users);
-        } else {
-          setActiveUsers(0);
-        }
-      } catch (error) {
-        console.error("Error fetching user count:", error);
-        setActiveUsers(0);
-      }
-    }
-    fetchActiveUserCount();
-  }, [globalFilters]);
-
   const [newSignups, setNewSignups] = useState<number>(0);
-  useEffect(() => {
-    async function fetchNewSignups() {
-      try {
-        const filterParams = buildFilterParams();
-        const res = await fetch(
-          `${api_startpoint}/api/new-signups?${filterParams}`
-        );
-        const data = await res.json();
-        if (data && data.length > 0 && data[0].count !== undefined) {
-          setNewSignups(data[0].count);
-        } else {
-          setNewSignups(0);
-        }
-      } catch (error) {
-        console.error("Error fetching user count:", error);
-        setNewSignups(0);
-      }
-    }
-    fetchNewSignups();
-  }, [globalFilters]);
-
   const [approvalRate, setApprovalRate] = useState<number>(0);
-  useEffect(() => {
-    async function fetchApprovalRate() {
-      try {
-        const filterParams = buildFilterParams();
-        const res = await fetch(
-          `${api_startpoint}/api/approval-rate?${filterParams}`
-        );
-        const data = await res.json();
-        if (data && data.length > 0 && data[0].Approval_Rate !== undefined) {
-          setApprovalRate(data[0].Approval_Rate);
-        } else {
-          setApprovalRate(0);
-        }
-      } catch (error) {
-        console.error("Error fetching approval rate:", error);
-        setApprovalRate(0);
-      }
-    }
-    fetchApprovalRate();
-  }, [globalFilters]);
+  const [schoolCount, setSchoolCount] = useState<number>(0);
+  const [totalTeachers, setTotalTeachers] = useState<number>(0);
+  const [totalStudents, setTotalStudents] = useState<number>(0);
 
+  // Progressive loading triggered by debounced filter changes
+  useEffect(() => {
+    loadDashboardData();
+  }, [debouncedFilters]);
+
+  // Individual useEffect hooks removed - handled by parallel loading
+
+  // Individual useEffect hooks removed - handled by progressive loading
   // Coupon redeem chart data
   const [couponRedeemCount, setCouponRedeemCount] = useState<
     Array<{ amount: string; coupon_count: number }>
@@ -1950,25 +2473,7 @@ export default function UserAnalyticsDashboard() {
     series: [...seriesGrade, totalSeriesStudentGrade],
   };
 
-  const [totalStudents, setTotalStudents] = useState<number>(0);
-  useEffect(() => {
-    async function fetchStudentCount() {
-      try {
-        const res = await fetch(`${api_startpoint}/api/total-student-count`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildFilterParams()),
-        });
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setTotalStudents(data[0].count);
-        }
-      } catch (error) {
-        console.error("Error fetching user count:", error);
-      }
-    }
-    fetchStudentCount();
-  }, [globalFilters]);
+  // totalStudents - handled by progressive loading
 
   // State variable to hold the transformed chart data.
   const [EchartDataTeacherGrade, setEchartDataTeacherGrade] = useState<any[]>(
@@ -2131,25 +2636,7 @@ export default function UserAnalyticsDashboard() {
     series: [...seriesTeacherGrade, totalSeriesTeacherGrade],
   };
 
-  const [totalTeachers, setTotalTeachers] = useState<number>(0);
-  useEffect(() => {
-    async function fetchTeacherCount() {
-      try {
-        const res = await fetch(`${api_startpoint}/api/teacher-count`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildFilterParams()),
-        });
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setTotalTeachers(data[0].total_count);
-        }
-      } catch (error) {
-        console.error("Error fetching user count:", error);
-      }
-    }
-    fetchTeacherCount();
-  }, [globalFilters]);
+  // totalTeachers - handled by progressive loading
 
   // Build options for the Students by Grade bar chart
   // const studentsChartOption = {
@@ -2270,6 +2757,13 @@ export default function UserAnalyticsDashboard() {
         const apiData: { count: string; state: string }[] =
           await apiResponse.json();
 
+        // Validate that apiData is an array
+        if (!Array.isArray(apiData)) {
+          console.error("API response is not an array:", apiData);
+          setChartStudentsData([]);
+          return;
+        }
+
         // Map API state names to your defined region keys
         const stateMappings: Record<string, string> = {
           "Tamil Nadu": "tamil nadu",
@@ -2322,6 +2816,7 @@ export default function UserAnalyticsDashboard() {
         setChartStudentsData(transformedData);
       } catch (error) {
         console.error("Error fetching state-wise student count:", error);
+        setChartStudentsData([]); // Reset to empty array on error
       }
     }
     fetchStateData();
@@ -2382,16 +2877,30 @@ export default function UserAnalyticsDashboard() {
   useEffect(() => {
     async function fetchTeacherData() {
       try {
+        const filterParams = buildFilterParams();
+        console.log("DEBUG: Sending to teacher demograph:", filterParams);
+
         // Fetch state-wise teacher count from API
         const apiResponse = await fetch(
           `${api_startpoint}/api/demograph-teachers`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(buildFilterParams()),
+            body: JSON.stringify(filterParams),
           }
         );
+
+        console.log("DEBUG: Teacher API response status:", apiResponse.status);
         const apiData: DemographData[] = await apiResponse.json();
+        console.log("DEBUG: Teacher API response data:", apiData);
+
+        // Validate that apiData is an array
+        if (!Array.isArray(apiData)) {
+          console.error("API response is not an array:", apiData);
+          setGeoData([]);
+          setChartTeacherData([]);
+          return;
+        }
 
         // Store the API data (for debugging or future use)
         setGeoData(apiData);
@@ -2447,6 +2956,8 @@ export default function UserAnalyticsDashboard() {
         setChartTeacherData(transformedData);
       } catch (error) {
         console.error("Error fetching teacher data:", error);
+        setGeoData([]);
+        setChartTeacherData([]);
       }
     }
 
@@ -2578,52 +3089,10 @@ export default function UserAnalyticsDashboard() {
   };
 
   const [totalPointsEarned, setTotalPointsEarned] = useState<number>(0);
-  useEffect(() => {
-    async function fetchTotalPointsEarned() {
-      try {
-        const res = await fetch(`${api_startpoint}/api/total-points-earned`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildFilterParams()),
-        });
-
-        if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
-        }
-
-        const data = await res.json();
-
-        // Access the total_points directly from the response object
-        if (data && typeof data.total_points === "string") {
-          setTotalPointsEarned(parseInt(data.total_points));
-        }
-      } catch (error) {
-        console.error("Error fetching total points:", error);
-      }
-    }
-
-    fetchTotalPointsEarned();
-  }, [globalFilters]);
+  // totalPointsEarned now loaded by loadAdditionalMetrics
 
   const [totalPointsRedeemed, setTotalPointsRedeemed] = useState<number>(0);
-  useEffect(() => {
-    async function fetchTotalPointsRedeemed() {
-      try {
-        const res = await fetch(`${api_startpoint}/api/total-points-redeemed`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildFilterParams()),
-        });
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setTotalPointsRedeemed(data[0].total_coins_redeemed);
-        }
-      } catch (error) {
-        console.error("Error fetching user count:", error);
-      }
-    }
-    fetchTotalPointsRedeemed();
-  }, [globalFilters]);
+  // totalPointsRedeemed now loaded by loadAdditionalMetrics
 
   const [missionGrouping, setMissionGrouping] = useState<string>("daily");
   const [missionData, setMissionData] = useState<any[]>([]);
@@ -4647,349 +5116,58 @@ export default function UserAnalyticsDashboard() {
     series: [...seriesSchool, totalSeriesSchool],
   };
 
-  // ---------------------------------------------------------------------------------------------
-  const [schoolCount, setSchoolCount] = useState<number>(0);
-  useEffect(() => {
-    async function fetchSchoolCount() {
-      try {
-        const res = await fetch(`${api_startpoint}/api/school_count`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildFilterParams()),
-        });
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setSchoolCount(data[0].count);
-        }
-      } catch (error) {
-        console.error("Error fetching user count:", error);
-      }
-    }
-    fetchSchoolCount();
-  }, [globalFilters]);
+  // schoolCount - handled by progressive loading
   const [quizCompletes, setQuizCompletes] = useState<number>(0);
-  useEffect(() => {
-    async function fetchQuizCompletes() {
-      try {
-        const res = await fetch(`${api_startpoint}/api/quiz_completes`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildFilterParams()),
-        });
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setQuizCompletes(data[0].count);
-        }
-      } catch (error) {
-        console.error("Error fetching user count:", error);
-      }
-    }
-    fetchQuizCompletes();
-  }, [globalFilters]);
+  // quizCompletes now loaded by loadAdditionalMetrics
 
   const [tmcAssignedByTeacher, setTmcAssignedByTeacher] = useState<number>(0);
-  useEffect(() => {
-    async function fetchTmcAssignedByTeacher() {
-      try {
-        const res = await fetch(
-          `${api_startpoint}/api/total-missions-completed-assigned-by-teacher`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(buildFilterParams()),
-          }
-        );
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setTmcAssignedByTeacher(data[0].count);
-        }
-      } catch (error) {
-        console.error(
-          "Error fetching total-missions-completed-assigned-by-teacher:",
-          error
-        );
-      }
-    }
-    fetchTmcAssignedByTeacher();
-  }, [globalFilters]);
+  // tmcAssignedByTeacher now loaded by loadAdditionalMetrics
 
   const [tmcTotal, setTmcTotal] = useState<number>(0);
-  useEffect(() => {
-    async function fetchTmcTotal() {
-      try {
-        const res = await fetch(
-          `${api_startpoint}/api/total_missions_completes`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(buildFilterParams()),
-          }
-        );
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setTmcTotal(data[0].count);
-        }
-      } catch (error) {
-        console.error("Error fetching total_missions_completes:", error);
-      }
-    }
-    fetchTmcTotal();
-  }, [globalFilters]);
+  // tmcTotal now loaded by loadAdditionalMetrics
 
   const [tjcTotal, setTjcTotal] = useState<number>(0);
-  useEffect(() => {
-    async function fetchTjcTotal() {
-      try {
-        const res = await fetch(
-          `${api_startpoint}/api/total_jigyasa_completes`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(buildFilterParams()),
-          }
-        );
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setTjcTotal(data[0].count);
-        }
-      } catch (error) {
-        console.error("Error fetching total_jigyasa_completes:", error);
-      }
-    }
-    fetchTjcTotal();
-  }, [globalFilters]);
+  // tjcTotal now loaded by loadAdditionalMetrics
 
   const [tpcTotal, setTpcTotal] = useState<number>(0);
-  useEffect(() => {
-    async function fetchTpcTotal() {
-      try {
-        const res = await fetch(
-          `${api_startpoint}/api/total_pragya_completes`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(buildFilterParams()),
-          }
-        );
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setTpcTotal(data[0].count);
-        }
-      } catch (error) {
-        console.error("Error fetching total_pragya_completes:", error);
-      }
-    }
-    fetchTpcTotal();
-  }, [globalFilters]);
+  // tpcTotal now loaded by loadAdditionalMetrics
 
   const [tqcTotal, setTqcTotal] = useState<number>(0);
-  useEffect(() => {
-    async function fetchTqcTotal() {
-      try {
-        const res = await fetch(`${api_startpoint}/api/total_quiz_completes`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildFilterParams()),
-        });
-        const data = await res.json();
-        if (data && data.count !== undefined) {
-          setTqcTotal(data.count);
-        }
-      } catch (error) {
-        console.error("Error fetching total_quiz_completes:", error);
-      }
-    }
-    fetchTqcTotal();
-  }, [globalFilters]);
+  // tqcTotal now loaded by loadAdditionalMetrics - Note: This seems to be duplicate of quizCompletes
 
   const [trcTotal, setTrcTotal] = useState<number>(0);
-  useEffect(() => {
-    async function fetchTrcTotal() {
-      try {
-        const res = await fetch(
-          `${api_startpoint}/api/total_riddle_completes`,
-          {
-            method: "POST",
-          }
-        );
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setTrcTotal(data[0].count);
-        }
-      } catch (error) {
-        console.error("Error fetching total_riddle_completes:", error);
-      }
-    }
-    fetchTrcTotal();
-  }, []);
+  // trcTotal now loaded by loadAdditionalMetrics
 
   const [tpzcTotal, setTpzcTotal] = useState<number>(0);
-  useEffect(() => {
-    async function fetchTpzcTotal() {
-      try {
-        const res = await fetch(
-          `${api_startpoint}/api/total_puzzle_completes`,
-          {
-            method: "POST",
-          }
-        );
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setTpzcTotal(data[0].count);
-        }
-      } catch (error) {
-        console.error("Error fetching total_puzzle_completes:", error);
-      }
-    }
-    fetchTpzcTotal();
-  }, []);
+  // tpzcTotal now loaded by loadAdditionalMetrics
 
   const [missionsParticipationRate, setMissionParticipationRate] =
     useState<number>(0);
-
-  useEffect(() => {
-    async function fetchMissionsParticipationRate() {
-      try {
-        const filterParams = buildFilterParams();
-        const res = await fetch(
-          `${api_startpoint}/api/mission_participation_rate?${filterParams}`,
-          {
-            method: "POST",
-          }
-        );
-        const data = await res.json();
-        if (data && data.participation_rate !== undefined) {
-          setMissionParticipationRate(data.participation_rate);
-        }
-      } catch (error) {
-        console.error("Error fetching mission_participation_rate:", error);
-      }
-    }
-
-    fetchMissionsParticipationRate();
-  }, [globalFilters]);
+  // missionsParticipationRate needs to be added to loadAdditionalMetrics
 
   const [jigyasaParticipationRate, setJigyasaParticipationRate] =
     useState<number>(0);
-
-  useEffect(() => {
-    async function fetchJigyasaParticipationRate() {
-      try {
-        const filterParams = buildFilterParams();
-        const res = await fetch(
-          `${api_startpoint}/api/jigyasa_participation_rate?${filterParams}`,
-          {
-            method: "POST",
-          }
-        );
-        const data = await res.json();
-        if (data && data.participation_rate !== undefined) {
-          setJigyasaParticipationRate(data.participation_rate);
-        }
-      } catch (error) {
-        console.error("Error fetching jigyasa_participation_rate:", error);
-      }
-    }
-
-    fetchJigyasaParticipationRate();
-  }, [globalFilters]);
+  // jigyasaParticipationRate needs to be added to loadAdditionalMetrics
 
   const [pragyaParticipationRate, setPragyaParticipationRate] =
     useState<number>(0);
-
-  useEffect(() => {
-    async function fetchPragyaParticipationRate() {
-      try {
-        const filterParams = buildFilterParams();
-        const res = await fetch(
-          `${api_startpoint}/api/pragya_participation_rate?${filterParams}`,
-          {
-            method: "POST",
-          }
-        );
-        const data = await res.json();
-        if (data && data.participation_rate !== undefined) {
-          setPragyaParticipationRate(data.participation_rate);
-        }
-      } catch (error) {
-        console.error("Error fetching pragya_participation_rate:", error);
-      }
-    }
-
-    fetchPragyaParticipationRate();
-  }, [globalFilters]);
+  // pragyaParticipationRate needs to be added to loadAdditionalMetrics
 
   const [quizParticipationRate, setQuizParticipationRate] = useState<number>(0);
-
-  useEffect(() => {
-    async function fetchQuizParticipationRate() {
-      try {
-        const filterParams = buildFilterParams();
-        const res = await fetch(
-          `${api_startpoint}/api/quiz_participation_rate?${filterParams}`,
-          {
-            method: "POST",
-          }
-        );
-        const data = await res.json();
-        if (data && data.participation_rate !== undefined) {
-          setQuizParticipationRate(data.participation_rate);
-        }
-      } catch (error) {
-        console.error("Error fetching mission_participation_rate:", error);
-      }
-    }
-
-    fetchQuizParticipationRate();
-  }, [globalFilters]);
+  // quizParticipationRate needs to be added to loadAdditionalMetrics
 
   const [sessionParticipantTotal, setSessionParticipantTotal] =
     useState<number>(0);
-  useEffect(() => {
-    async function fetchSessionParticipantTotal() {
-      try {
-        const filterParams = buildFilterParams();
-        const res = await fetch(
-          `${api_startpoint}/api/session_participants_total?${filterParams}`,
-          {
-            method: "POST",
-          }
-        );
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setSessionParticipantTotal(data[0].count);
-        }
-      } catch (error) {
-        console.error("Error fetching user count:", error);
-      }
-    }
-    fetchSessionParticipantTotal();
-  }, [globalFilters]);
+  // sessionParticipantTotal now loaded by loadAdditionalMetrics
 
   const [
     mentorsParticipatedSessionsTotal,
     setMentorsParticipatedSessionsTotal,
   ] = useState<number>(0);
-  useEffect(() => {
-    async function fetchMentorsParticipatedSessionsTotal() {
-      try {
-        const filterParams = buildFilterParams();
-        const res = await fetch(
-          `${api_startpoint}/api/mentor_participated_in_sessions_total?${filterParams}`,
-          {
-            method: "POST",
-          }
-        );
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setMentorsParticipatedSessionsTotal(data[0].count);
-        }
-      } catch (error) {
-        console.error("Error fetching user count:", error);
-      }
-    }
-    fetchMentorsParticipatedSessionsTotal();
-  }, [globalFilters]);
+  // mentorsParticipatedSessionsTotal now loaded by loadAdditionalMetrics
+
+  const [totalSessionsCreated, setTotalSessionsCreated] = useState<number>(0);
+  // totalSessionsCreated now loaded by loadAdditionalMetrics
 
   const [modalOpenLevel, setModalOpenLevel] = useState(false);
   // const [selectedLevel, setSelectedLevel] = useState<string>('all')
@@ -5427,16 +5605,7 @@ export default function UserAnalyticsDashboard() {
   };
 
   const [totalCountPBL, setTotalCountPBL] = useState<number>(0);
-  // Fetch total count
-  useEffect(() => {
-    const filterParams = buildFilterParams();
-    fetch(`${api_startpoint}/api/PBLsubmissions/total?${filterParams}`)
-      .then((res) => res.json())
-      .then((json) => {
-        setTotalCountPBL(json.total ?? 0);
-      })
-      .catch((err) => console.error(err));
-  }, [globalFilters]);
+  // totalCountPBL now loaded by loadAdditionalMetrics
 
   // ################################ VISIONS ##############################
   interface StatRowVision {
@@ -5622,45 +5791,212 @@ export default function UserAnalyticsDashboard() {
   //----------------------- vision count card ----------------------
   const [totalVisionScore, setTotalVisionScore] = useState<number>(0);
   const [totalVisionSubmitted, setTotalVisionSubmitted] = useState<number>(0);
-  useEffect(() => {
-    fetch(`${api_startpoint}/api/vision-answer-summary`)
-      .then((res) => res.json())
-      .then((json) => {
-        setTotalVisionScore(json.total_score);
-        setTotalVisionSubmitted(json.total_vision_answers);
-      });
-  }, []);
+  // totalVisionScore and totalVisionSubmitted now loaded by loadAdditionalMetrics
+
+  // Export functionality
+  const exportToExcel = () => {
+    const workbook = XLSX.utils.book_new();
+    const timestamp = new Date().toISOString();
+
+    // Create metadata sheet
+    const metadataSheet = XLSX.utils.aoa_to_sheet([
+      ["Dashboard Export Report"],
+      ["Export Date:", new Date().toLocaleString()],
+      ["Filters Applied:"],
+      ["State:", globalFilters.state || "All"],
+      ["City:", globalFilters.city || "All"],
+      ["School:", globalFilters.schoolCode || "All"],
+      ["User Type:", globalFilters.userType || "All"],
+      ["Grade:", globalFilters.grade || "All"],
+      ["Gender:", globalFilters.gender || "All"],
+      ["Date Range:", globalFilters.dateRange || "All"],
+      [],
+      ["Summary Metrics:"],
+      ["Total Users:", totalUsers],
+      ["Active Users:", activeUsers],
+      ["New Signups:", newSignups],
+      ["Approval Rate:", approvalRate + "%"],
+      ["Total Vision Score:", totalVisionScore],
+      ["Total Vision Submitted:", totalVisionSubmitted],
+    ]);
+    XLSX.utils.book_append_sheet(workbook, metadataSheet, "Summary");
+
+    // Export User Signups Over Time
+    if (EchartData && EchartData.length > 0) {
+      const signupData = EchartData.map((item) => ({
+        Period: item.period,
+        Count: item.count,
+        Admin: item.Admin || 0,
+        Student: item.Student || 0,
+        Mentor: item.Mentor || 0,
+        Teacher: item.Teacher || 0,
+        Unspecified: item.Unspecified || 0,
+      }));
+      const signupSheet = XLSX.utils.json_to_sheet(signupData);
+      XLSX.utils.book_append_sheet(workbook, signupSheet, "User Signups");
+    }
+
+    // Export Coupon Redemption Data
+    if (couponRedeemCount && couponRedeemCount.length > 0) {
+      const couponData = couponRedeemCount.map((item) => ({
+        Amount: item.amount,
+        Count: item.coupon_count,
+      }));
+      const couponSheet = XLSX.utils.json_to_sheet(couponData);
+      XLSX.utils.book_append_sheet(workbook, couponSheet, "Coupon Redemptions");
+    }
+
+    // Export School State Distribution
+    if (stateCounts && stateCounts.length > 0) {
+      const stateData = stateCounts.map((item) => ({
+        State: item.state,
+        School_Count: item.count_state,
+      }));
+      const stateSheet = XLSX.utils.json_to_sheet(stateData);
+      XLSX.utils.book_append_sheet(workbook, stateSheet, "Schools by State");
+    }
+
+    // Export User Type Distribution
+    if (userTypeData && userTypeData.length > 0) {
+      const userTypeSheet = XLSX.utils.json_to_sheet(userTypeData);
+      XLSX.utils.book_append_sheet(workbook, userTypeSheet, "User Types");
+    }
+
+    // Export Students by Grade Over Time
+    if (EchartDataGrade && EchartDataGrade.length > 0) {
+      const gradeSheet = XLSX.utils.json_to_sheet(EchartDataGrade);
+      XLSX.utils.book_append_sheet(workbook, gradeSheet, "Students by Grade");
+    }
+
+    // Export Teachers by Grade Over Time
+    if (EchartDataTeacherGrade && EchartDataTeacherGrade.length > 0) {
+      const teacherGradeSheet = XLSX.utils.json_to_sheet(
+        EchartDataTeacherGrade
+      );
+      XLSX.utils.book_append_sheet(
+        workbook,
+        teacherGradeSheet,
+        "Teachers by Grade"
+      );
+    }
+
+    // Export Students by State
+    if (chartStudentsData && chartStudentsData.length > 0) {
+      const studentStateData = chartStudentsData.map((item) => ({
+        State: item.code,
+        Student_Count: item.value,
+      }));
+      const studentStateSheet = XLSX.utils.json_to_sheet(studentStateData);
+      XLSX.utils.book_append_sheet(
+        workbook,
+        studentStateSheet,
+        "Students by State"
+      );
+    }
+
+    // Export Teachers by State
+    if (chartTeacherData && chartTeacherData.length > 0) {
+      const teacherStateData = chartTeacherData.map((item) => ({
+        State: item.code,
+        Teacher_Count: item.value,
+      }));
+      const teacherStateSheet = XLSX.utils.json_to_sheet(teacherStateData);
+      XLSX.utils.book_append_sheet(
+        workbook,
+        teacherStateSheet,
+        "Teachers by State"
+      );
+    }
+
+    // Export Mission Data
+    if (missionData && missionData.length > 0) {
+      const missionSheet = XLSX.utils.json_to_sheet(missionData);
+      XLSX.utils.book_append_sheet(workbook, missionSheet, "Mission Data");
+    }
+
+    // Export Jigyasa Data
+    if (jigyasaData && jigyasaData.length > 0) {
+      const jigyasaSheet = XLSX.utils.json_to_sheet(jigyasaData);
+      XLSX.utils.book_append_sheet(workbook, jigyasaSheet, "Jigyasa Data");
+    }
+
+    // Export Pragya Data
+    if (pragyaData && pragyaData.length > 0) {
+      const pragyaSheet = XLSX.utils.json_to_sheet(pragyaData);
+      XLSX.utils.book_append_sheet(workbook, pragyaSheet, "Pragya Data");
+    }
+
+    // Export Quiz Data
+    if (quizData && quizData.length > 0) {
+      const quizSheet = XLSX.utils.json_to_sheet(quizData);
+      XLSX.utils.book_append_sheet(workbook, quizSheet, "Quiz Data");
+    }
+
+    // Export Vision Statistics
+    if (statsVision && statsVision.length > 0) {
+      const visionSheet = XLSX.utils.json_to_sheet(statsVision);
+      XLSX.utils.book_append_sheet(workbook, visionSheet, "Vision Statistics");
+    }
+
+    // Export Points Data
+    if (pointsMissionData && pointsMissionData.length > 0) {
+      const missionPointsSheet = XLSX.utils.json_to_sheet(pointsMissionData);
+      XLSX.utils.book_append_sheet(
+        workbook,
+        missionPointsSheet,
+        "Mission Points"
+      );
+    }
+
+    if (pointsQuizData && pointsQuizData.length > 0) {
+      const quizPointsSheet = XLSX.utils.json_to_sheet(pointsQuizData);
+      XLSX.utils.book_append_sheet(workbook, quizPointsSheet, "Quiz Points");
+    }
+
+    if (pointsJigyasaData && pointsJigyasaData.length > 0) {
+      const jigyasaPointsSheet = XLSX.utils.json_to_sheet(pointsJigyasaData);
+      XLSX.utils.book_append_sheet(
+        workbook,
+        jigyasaPointsSheet,
+        "Jigyasa Points"
+      );
+    }
+
+    if (pointsPragyaData && pointsPragyaData.length > 0) {
+      const pragyaPointsSheet = XLSX.utils.json_to_sheet(pointsPragyaData);
+      XLSX.utils.book_append_sheet(
+        workbook,
+        pragyaPointsSheet,
+        "Pragya Points"
+      );
+    }
+
+    // Export Coupon Redeems Data
+    if (couponRedeemsData && couponRedeemsData.length > 0) {
+      const couponRedeemsSheet = XLSX.utils.json_to_sheet(couponRedeemsData);
+      XLSX.utils.book_append_sheet(
+        workbook,
+        couponRedeemsSheet,
+        "Coupon Redeems"
+      );
+    }
+
+    // Generate filename with timestamp
+    const filename = `Dashboard_Export_${new Date()
+      .toISOString()
+      .slice(0, 19)
+      .replace(/:/g, "-")}.xlsx`;
+
+    // Save the file
+    XLSX.writeFile(workbook, filename);
+  };
 
   return (
     <div className={`page bg-light ${inter.className} font-sans`}>
-      {/* Fixed Sidebar */}
-      {/* Updated Sidebar Component with strict inline styles */}
       <Sidebar />
 
       {/* Main Content */}
       <div className="page-wrapper" style={{ marginLeft: "250px" }}>
-        {/* Top Navigation */}
-        {/* <header className="navbar navbar-expand-md navbar-light bg-white shadow-sm border-bottom">
-          <div className="container-fluid">
-            <div className="d-flex align-items-center w-full">
-              <span className='font-bold text-xl text-black '>LifeAppDashBoard</span>
-              <div className='w-5/6 h-10'></div>
-              <div className="d-flex gap-3 align-items-center">
-                <a href="#" className="btn btn-light btn-icon">
-                  <IconSearch size={20} className="text-muted"/>
-                </a>
-                <a href="#" className="btn btn-light btn-icon position-relative">
-                  <IconBell size={20} className="text-muted"/>
-                  <span className="badge bg-danger position-absolute top-0 end-0">3</span>
-                </a>
-                <a href="#" className="btn btn-light btn-icon">
-                  <IconSettings size={20} className="text-muted"/>
-                </a>
-              </div>
-            </div>
-          </div>
-        </header> */}
-
         {/* Main Content Area */}
         <div className="page-body">
           <div className="container-xl pt-0 pb-4">
@@ -6024,32 +6360,11 @@ export default function UserAnalyticsDashboard() {
                   icon: <IconUsers />,
                   color: "bg-purple",
                 },
-                // {
-                //   title: "Active Users",
-                //   value: activeUsers,
-                //   icon: <IconUserCheck />,
-                //   color: "bg-teal",
-                // },
-                // {
-                //   title: "Inactive Users",
-                //   value: 0,
-                //   icon: <IconUserPlus />,
-                //   color: "bg-orange",
-                // },
+                //{ title: 'Active Users', value: activeUsers, icon: <IconUserCheck />, color: 'bg-teal' },
+                //{ title: 'Inactive Users', value: 0, icon: <IconUserPlus />, color: 'bg-orange' },
                 // { title: 'New Signups', value: newSignups, icon: <IconUserPlus />, color: 'bg-orange' },
-                // {
-                //   title: "Highest Users Online",
-                //   value: 0,
-                //   icon: <IconUserPlus />,
-                //   color: "bg-orange",
-                //   suffix: "",
-                // },
-                // {
-                //   title: "Total Downloads",
-                //   value: 45826,
-                //   icon: <IconPercentage />,
-                //   color: "bg-sky-900",
-                // },
+                //{ title: 'Highest Users Online', value: 0, icon: <IconUserPlus />, color: 'bg-orange', suffix: '' },
+                //{ title: 'Total Downloads', value: 45826, icon: <IconPercentage />, color: 'bg-sky-900',},
                 {
                   title: "Total Coins Earned",
                   value: totalPointsEarned,
@@ -6082,7 +6397,7 @@ export default function UserAnalyticsDashboard() {
                 },
                 {
                   title: "Total Sessions Created by Mentors",
-                  value: sessions.length,
+                  value: totalSessionsCreated,
                   icon: <IconPercentage />,
                   color: "bg-blue",
                 },
@@ -6195,30 +6510,41 @@ export default function UserAnalyticsDashboard() {
                 },
               ].map((metric, index) => (
                 <div className="col-sm-6 col-lg-3" key={index}>
-                  <div className="card">
-                    <div className="card-body">
-                      <div className="d-flex align-items-center">
-                        {/* <div className={`${metric.color} rounded-circle p-3 text-white`}>
-                          {React.cloneElement(metric.icon, { size: 24 })}
-                        </div> */}
-                        <div>
-                          <div className="subheader">{metric.title}</div>
-                          <div className="h1 mb-3">
-                            <NumberFlow
-                              value={metric.value}
-                              suffix={metric.suffix || ""}
-                              className="fw-semi-bold text-dark"
-                              transformTiming={{
-                                endDelay: 6,
-                                duration: 750,
-                                easing: "cubic-bezier(0.42, 0, 0.58, 1)",
-                              }}
-                            />
+                  {loadingPhase1 ? (
+                    <MetricCardSkeleton />
+                  ) : (
+                    <div className="card">
+                      <div className="card-body">
+                        <div className="d-flex align-items-center">
+                          {/* <div className={`${metric.color} rounded-circle p-3 text-white`}>
+                            {React.cloneElement(metric.icon, { size: 24 })}
+                          </div> */}
+                          <div>
+                            <div className="subheader">{metric.title}</div>
+                            <div className="h1 mb-3">
+                              <NumberFlow
+                                value={Number(metric.value) || 0}
+                                suffix={metric.suffix || ""}
+                                className="fw-semi-bold text-dark"
+                                transformTiming={{
+                                  endDelay: 6,
+                                  duration: 750,
+                                  easing: "cubic-bezier(0.42, 0, 0.58, 1)",
+                                }}
+                                format={{
+                                  notation:
+                                    metric.value > 999999
+                                      ? "compact"
+                                      : "standard",
+                                  compactDisplay: "short",
+                                }}
+                              />
+                            </div>
                           </div>
                         </div>
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -6297,10 +6623,10 @@ export default function UserAnalyticsDashboard() {
                   ) : error ? (
                     <div>Error: {error}</div>
                   ) : (
-                    <ReactECharts
-                      ref={chartRef1}
+                    <LazyChart
                       option={EchartOption}
                       style={{ height: "400px", width: "100%" }}
+                      loading={loadingPhase2}
                     />
                   )}
                 </div>
@@ -6372,10 +6698,10 @@ export default function UserAnalyticsDashboard() {
                   ) : error ? (
                     <div>Error: {errorGender}</div>
                   ) : (
-                    <ReactECharts
-                      ref={chartRef2}
+                    <LazyChart
                       option={EchartGenderOption}
                       style={{ height: "400px", width: "100%" }}
+                      loading={loadingGender || loadingPhase2}
                     />
                   )}
                 </div>
@@ -6483,10 +6809,10 @@ export default function UserAnalyticsDashboard() {
                         ></div>
                       </div>
                     ) : (
-                      <ReactECharts
-                        ref={chartRef3}
+                      <LazyChart
                         option={optionMissionTransformed}
                         style={{ height: "400px", width: "100%" }}
+                        loading={missionLoading || loadingPhase3}
                       />
                     )}
                   </div>
@@ -6570,10 +6896,10 @@ export default function UserAnalyticsDashboard() {
                         ></div>
                       </div>
                     ) : (
-                      <ReactECharts
-                        ref={chartRef4}
+                      <LazyChart
                         option={optionQuizTransformed}
                         style={{ height: "400px", width: "100%" }}
+                        loading={quizLoading || loadingPhase3}
                       />
                     )}
                   </div>
@@ -6682,10 +7008,10 @@ export default function UserAnalyticsDashboard() {
                         ></div>
                       </div>
                     ) : (
-                      <ReactECharts
-                        ref={chartRef5}
+                      <LazyChart
                         option={optionJigyasaTransformed}
                         style={{ height: "400px", width: "100%" }}
+                        loading={jigyasaLoading || loadingPhase3}
                       />
                     )}
                   </div>
@@ -6794,10 +7120,10 @@ export default function UserAnalyticsDashboard() {
                         ></div>
                       </div>
                     ) : (
-                      <ReactECharts
-                        ref={chartRef6}
+                      <LazyChart
                         option={optionPragyaTransformed}
                         style={{ height: "400px", width: "100%" }}
+                        loading={pragyaLoading || loadingPhase3}
                       />
                     )}
                   </div>
@@ -6883,10 +7209,10 @@ export default function UserAnalyticsDashboard() {
                           ></div>
                         </div>
                       ) : (
-                        <ReactECharts
-                          ref={chartRef19}
+                        <LazyChart
                           option={optionVision}
                           style={{ height: "400px", width: "100%" }}
+                          loading={visionLoading || loadingPhase3}
                         />
                       )}
                     </div>
@@ -6959,10 +7285,10 @@ export default function UserAnalyticsDashboard() {
                           ></div>
                         </div>
                       ) : (
-                        <ReactECharts
-                          ref={chartRef12}
+                        <LazyChart
                           option={pointsMissionChartOption}
                           style={{ height: 400 }}
+                          loading={pointsMissionLoading || loadingPhase3}
                         />
                       )}
                     </div>
@@ -7025,10 +7351,10 @@ export default function UserAnalyticsDashboard() {
                         ></div>
                       </div>
                     ) : (
-                      <ReactECharts
-                        ref={chartRef18}
+                      <LazyChart
                         option={pointsQuizChartOption}
                         style={{ height: "400px", width: "100%" }}
+                        loading={pointsQuizLoading || loadingPhase3}
                       />
                     )}
                   </div>
@@ -7099,10 +7425,10 @@ export default function UserAnalyticsDashboard() {
                           ></div>
                         </div>
                       ) : (
-                        <ReactECharts
-                          ref={chartRef13}
+                        <LazyChart
                           option={pointsJigyasaChartOption}
                           style={{ height: 400 }}
+                          loading={pointsJigyasaLoading || loadingPhase3}
                         />
                       )}
                     </div>
@@ -7174,10 +7500,10 @@ export default function UserAnalyticsDashboard() {
                           ></div>
                         </div>
                       ) : (
-                        <ReactECharts
-                          ref={chartRef14}
+                        <LazyChart
                           option={pointsPragyaChartOption}
                           style={{ height: 400 }}
+                          loading={pointsPragyaLoading || loadingPhase3}
                         />
                       )}
                     </div>
@@ -7240,10 +7566,10 @@ export default function UserAnalyticsDashboard() {
                           ></div>
                         </div>
                       ) : (
-                        <ReactECharts
-                          ref={chartRef20}
+                        <LazyChart
                           option={optionVisionScore}
                           style={{ height: 400 }}
+                          loading={VisionScoreLoading || loadingPhase3}
                         />
                       )}
                     </div>
@@ -7318,10 +7644,10 @@ export default function UserAnalyticsDashboard() {
                           ></div>
                         </div>
                       ) : (
-                        <ReactECharts
-                          ref={chartRef15}
+                        <LazyChart
                           option={couponRedeemsSeriesOptions}
                           style={{ height: 400 }}
+                          loading={couponRedeemsLoading || loadingPhase3}
                         />
                       )}
                     </div>
@@ -7398,10 +7724,10 @@ export default function UserAnalyticsDashboard() {
                           ></div>
                         </div>
                       ) : (
-                        <ReactECharts
-                          ref={chartRef17}
+                        <LazyChart
                           option={chartOptionPBL}
                           style={{ height: 400 }}
+                          loading={loadingPBL || loadingPhase3}
                         />
                       )}
                     </div>
@@ -7469,10 +7795,10 @@ export default function UserAnalyticsDashboard() {
                     ) : errorGrade ? (
                       <div>Error: {errorGrade}</div>
                     ) : (
-                      <ReactECharts
-                        ref={chartRef7}
+                      <LazyChart
                         option={EchartGradeOption}
                         style={{ height: "400px", width: "100%" }}
+                        loading={loadingGrade || loadingPhase2}
                       />
                     )}
                   </div>
@@ -7541,10 +7867,10 @@ export default function UserAnalyticsDashboard() {
                     ) : errorTeacherGrade ? (
                       <div>Error: {errorTeacherGrade}</div>
                     ) : (
-                      <ReactECharts
-                        ref={chartRef8}
+                      <LazyChart
                         option={EchartTeacherGradeOption}
                         style={{ height: "400px", width: "100%" }}
+                        loading={loadingTeacherGrade || loadingPhase2}
                       />
                     )}
                   </div>
@@ -7625,7 +7951,6 @@ export default function UserAnalyticsDashboard() {
                           ))}
                         </select>
                       </div>
-
                       {studentLoading ? (
                         <div className="text-center">
                           <div
@@ -7635,12 +7960,12 @@ export default function UserAnalyticsDashboard() {
                           ></div>
                         </div>
                       ) : (
-                        <ReactECharts
-                          ref={chartRef9}
+                        <LazyChart
                           option={chartOptionStudent}
                           style={{ height: "400px", width: "100%" }}
+                          loading={studentLoading || loadingPhase2}
                         />
-                      )}
+                      )}{" "}
                     </div>
                   </div>
                 </div>
@@ -7731,10 +8056,10 @@ export default function UserAnalyticsDashboard() {
                           ></div>
                         </div>
                       ) : (
-                        <ReactECharts
-                          ref={chartRef10}
+                        <LazyChart
                           option={chartOptionTeacher}
                           style={{ height: "400px", width: "100%" }}
+                          loading={teacherLoading || loadingPhase2}
                         />
                       )}
                     </div>
@@ -7813,10 +8138,10 @@ export default function UserAnalyticsDashboard() {
                         ></div>
                       </div>
                     ) : (
-                      <ReactECharts
-                        ref={chartRef16}
+                      <LazyChart
                         option={chartOptionSchool}
                         style={{ height: "400px", width: "100%" }}
+                        loading={schoolLoading || loadingPhase2}
                       />
                     )}
                   </div>
@@ -7931,10 +8256,10 @@ export default function UserAnalyticsDashboard() {
                       ) : errorLevel ? (
                         <div>Error: {errorLevel}</div>
                       ) : (
-                        <ReactECharts
-                          ref={chartRef11}
+                        <LazyChart
                           option={EchartLevelOption}
                           style={{ height: "400px", width: "100%" }}
+                          loading={loadingLevel || loadingPhase2}
                         />
                       )}
                     </div>
