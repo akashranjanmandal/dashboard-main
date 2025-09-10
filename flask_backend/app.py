@@ -45,17 +45,20 @@ DO_SPACES_ENDPOINT=os.getenv("DO_SPACES_ENDPOINT")
 
 # ----------  UPDATED connection factory ----------
 def get_db_connection():
-    # Always use the same credentials; only host flips
-    host = (
-        os.getenv("DB_HOST", "139.59.84.157")
-        if CURRENT_DB_MODE == "prod"
-        else "139.59.16.159"
-    )
+    if CURRENT_DB_MODE == "prod":
+        host = os.getenv("DB_HOST", "139.59.84.157")
+        user = "root"  # Explicitly use root for production
+        password = "LIFELAB@1server"  # Explicit password for production
+    else:
+        host = "139.59.16.159"  # Staging host
+        user = "root"  # Explicitly use root for staging
+        password = "LIFELAB@1server"  # Explicit password for staging
+
     return pymysql.connect(
         host=host,
         port=int(os.getenv("DB_PORT", 3306)),
-        user=os.getenv("DB_USERNAME", "root"),
-        password=os.getenv("DB_PASSWORD", "LIFELAB@1server"),
+        user=user,
+        password=password,
         database=os.getenv("DB_DATABASE", "lifeapp"),
         cursorclass=pymysql.cursors.DictCursor,
     )
