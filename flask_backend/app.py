@@ -191,20 +191,20 @@ def build_filter_conditions(request_args=None):
     # State filter
     state = request_args.get('state')
     if state and state != 'All':
-        conditions.append("s.state = %s")
+        conditions.append("u.state = %s")
         params.append(state)
     
     # City filter  
     city = request_args.get('city')
     if city and city != 'All':
-        conditions.append("s.city = %s")
+        conditions.append("u.city = %s")
         params.append(city)
     
     # School code filter
     school_code = request_args.get('school_code')
-    if school_code and school_code.strip() != '':
-        conditions.append("s.school_code = %s")
-        params.append(school_code.strip())
+    if school_code and school_code != 'All' and str(school_code).strip():
+        conditions.append("u.school_code = %s")
+        params.append(str(school_code).strip())
     
     # User type filter
     user_type = request_args.get('user_type')
@@ -212,39 +212,49 @@ def build_filter_conditions(request_args=None):
         if user_type == 'Student':
             conditions.append("u.type = 3")
         elif user_type == 'Teacher':
-            conditions.append("u.type = 2")
+            conditions.append("u.type = 5")
         elif user_type == 'Mentor':
             conditions.append("u.type = 4")
     
     # Grade filter
     grade = request_args.get('grade')
     if grade and grade != 'All':
-        conditions.append("u.grade = %s")
-        params.append(grade)
+        grade_num = grade.replace('Grade ', '')
+        if grade_num.isdigit():
+            conditions.append("u.grade = %s")
+            params.append(int(grade_num))
     
     # Gender filter
     gender = request_args.get('gender')
     if gender and gender != 'All':
-        conditions.append("u.gender = %s")
-        params.append(gender)
+        if gender == 'Male':
+            conditions.append("u.gender = 1")
+        elif gender == 'Female':
+            conditions.append("u.gender = 2")
     
-    # Date range filter
-    date_range = request_args.get('dateRange')
+    # Date range filter - updated to be consistent with other endpoints
+    date_range = request_args.get('date_range')
     if date_range and date_range != 'All':
-        if date_range == 'last7days':
-            conditions.append("u.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)")
-        elif date_range == 'last30days':
-            conditions.append("u.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)")
-        elif date_range == 'last3months':
-            conditions.append("u.created_at >= DATE_SUB(NOW(), INTERVAL 3 MONTH)")
-        elif date_range == 'last6months':
-            conditions.append("u.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)")
-        elif date_range == 'lastyear':
-            conditions.append("u.created_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)")
+        if date_range == 'Today':
+            conditions.append("DATE(created_at) = CURDATE()")
+        elif date_range == 'Yesterday':
+            conditions.append("DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)")
+        elif date_range == 'This Week':
+            conditions.append("WEEK(created_at, 1) = WEEK(CURDATE(), 1) AND YEAR(created_at) = YEAR(CURDATE())")
+        elif date_range == 'Last Week':
+            conditions.append("WEEK(created_at, 1) = WEEK(DATE_SUB(CURDATE(), INTERVAL 1 WEEK), 1) AND YEAR(created_at) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 WEEK))")
+        elif date_range == 'This Month':
+            conditions.append("MONTH(created_at) = MONTH(CURDATE()) AND YEAR(created_at) = YEAR(CURDATE())")
+        elif date_range == 'Last Month':
+            conditions.append("MONTH(created_at) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND YEAR(created_at) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))")
+        elif date_range == 'This Year':
+            conditions.append("YEAR(created_at) = YEAR(CURDATE())")
+        elif date_range == 'Last Year':
+            conditions.append("YEAR(created_at) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 YEAR))")
     
     where_clause = " AND ".join(conditions) if conditions else "1=1"
     return where_clause, params
-
+    
 def execute_query(query: str, params: tuple = None) -> List[Dict[str, Any]]:
     """
     Execute a database query and return results.
@@ -1613,8 +1623,95 @@ def get_total_sessions_created():
         return jsonify({'error': str(e)}), 500
     finally:
         connection.close()
-    
 
+@app.route('/api/session_participants_total_dashboard', methods=['POST'])
+def get_session_participants_total_dashboard():
+    """Get total count of participants in mentor sessions - only affected by date filter."""
+    try:
+        data = request.get_json() or {}
+        
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            # Base query - only apply date filters, not demographic filters
+            sql = """
+                SELECT COUNT(DISTINCT lasp.user_id) as count
+                FROM lifeapp.la_session_participants lasp
+                WHERE 1=1
+            """
+            
+            params = []
+            
+            # Extract only date_range from filters
+            date_range = data.get('date_range', '')
+            
+            # Apply only date range filter
+            if date_range and date_range != 'All':
+                if date_range == 'Today':
+                    sql += " AND DATE(lasp.created_at) = CURDATE()"
+                elif date_range == 'Yesterday':
+                    sql += " AND DATE(lasp.created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)"
+                elif date_range == 'This Week':
+                    sql += " AND WEEK(lasp.created_at, 1) = WEEK(CURDATE(), 1) AND YEAR(lasp.created_at) = YEAR(CURDATE())"
+                elif date_range == 'Last Week':
+                    sql += " AND WEEK(lasp.created_at, 1) = WEEK(DATE_SUB(CURDATE(), INTERVAL 1 WEEK), 1) AND YEAR(lasp.created_at) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 WEEK))"
+                elif date_range == 'This Month':
+                    sql += " AND MONTH(lasp.created_at) = MONTH(CURDATE()) AND YEAR(lasp.created_at) = YEAR(CURDATE())"
+                elif date_range == 'Last Month':
+                    sql += " AND MONTH(lasp.created_at) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND YEAR(lasp.created_at) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))"
+                elif date_range == 'This Year':
+                    sql += " AND YEAR(lasp.created_at) = YEAR(CURDATE())"
+                elif date_range == 'Last Year':
+                    sql += " AND YEAR(lasp.created_at) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 YEAR))"
+            
+            cursor.execute(sql, params)
+            result = cursor.fetchone()
+            count = result['count'] if result else 0
+            
+        return jsonify([{'count': count}]), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
+
+@app.route('/api/mentor_participated_in_sessions_total_dashboard', methods=['POST'])
+def get_mentor_participated_in_sessions_total_dashboard():
+    """Get total count of mentors who participated in sessions with filter support."""
+    try:
+        data = request.get_json() or {}
+        
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            # Build filter conditions using standardized function
+            filter_conditions, filter_params = build_filter_conditions(data)
+            
+            # Join with schools for location-based filtering
+            join_clause = ""
+            if any(key in data for key in ['state', 'city', 'school_code']):
+                join_clause = "JOIN lifeapp.schools s ON u.school_code = s.code"
+            
+            # Build WHERE clause properly
+            where_conditions = "u.type = 4"  # Only mentors
+            if filter_conditions and filter_conditions != "1=1":
+                where_conditions += f" AND {filter_conditions}"
+            
+            # Build base query with filters
+            sql = f"""
+                SELECT COUNT(DISTINCT las.user_id) as count
+                FROM lifeapp.la_sessions las
+                INNER JOIN lifeapp.users u ON las.user_id = u.id
+                {join_clause}
+                WHERE {where_conditions}
+            """
+            
+            cursor.execute(sql, filter_params)
+            result = cursor.fetchone()
+            count = result['count'] if result else 0
+            
+        return jsonify([{'count': count}]), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        connection.close()
 
 @app.route('/api/histogram_level_subject_challenges_complete', methods=['POST'])
 def get_histogram_data_level_subject_challenges_complete():
@@ -5029,9 +5126,26 @@ def get_school_districts():
 ######################## STUDENT/ MISSION APIs ####################################
 ###################################################################################
 ###################################################################################
+def notify_mission_status(mission_id, user_id, status):
+    """
+    Helper function to notify mission status via external API
+    status: 'approved' | 'rejected'
+    """
+    try:
+        resp = requests.post(
+            f"https://api.life-lab.org/v3/missions/{mission_id}/notify",
+            json={"status": status, "user_id": user_id},
+            timeout=5
+        )
+        print(f"Notification response: {resp.json()}")
+        return True
+    except Exception as e:
+        print(f"Notification error: {e}")
+        return False
+
 @app.route('/api/student_mission_search', methods=['POST'])
 def mission_search():
-    print("📥 Received request for /api/student_mission_search")
+    print("Received request for /api/student_mission_search")
 
     filters = request.get_json() or {}
     mission_acceptance = filters.get('mission_acceptance')
@@ -5039,11 +5153,11 @@ def mission_search():
     from_date = filters.get('from_date')
     to_date = filters.get('to_date')
     page = int(filters.get('page', 1))
-    per_page = int(filters.get('per_page', 15))  # Changed default from 50 to 15 for better pagination
+    per_page = int(filters.get('per_page', 15))
     offset = (page - 1) * per_page
 
-    print(f"🔎 Filters received: {filters}")
-    print(f"📄 Page: {page}, Per Page: {per_page}, Offset: {offset}")
+    print(f"Filters received: {filters}")
+    print(f"Page: {page}, Per Page: {per_page}, Offset: {offset}")
 
     sql = """
         WITH cte AS (
@@ -5096,25 +5210,25 @@ def mission_search():
     if mission_acceptance and mission_acceptance in ("Approved", "Requested", "Rejected"):
         sql += " AND cte.Status = %s"
         params.append(mission_acceptance)
-        print(f"🟡 Filter: mission_acceptance={mission_acceptance}")
+        print(f"Filter: mission_acceptance={mission_acceptance}")
 
     if assigned_by:
         if assigned_by.lower() == "self":
             sql += " AND cte.Assigned_By = 'Self'"
-            print(f"🟡 Filter: assigned_by=Self")
+            print(f"Filter: assigned_by=Self")
         elif assigned_by.lower() == "teacher":
             sql += " AND cte.Assigned_By <> 'Self'"
-            print(f"🟡 Filter: assigned_by=Teacher")
+            print(f"Filter: assigned_by=Teacher")
 
     if from_date:
         sql += " AND cte.Requested_At >= %s"
         params.append(from_date)
-        print(f"🟡 Filter: from_date={from_date}")
+        print(f"Filter: from_date={from_date}")
 
     if to_date:
         sql += " AND cte.Requested_At <= %s"
         params.append(to_date)
-        print(f"🟡 Filter: to_date={to_date}")
+        print(f"Filter: to_date={to_date}")
 
     schoolCodes = filters.get('school_code')
     if schoolCodes:
@@ -5122,41 +5236,40 @@ def mission_search():
         placeholders = ",".join(["%s"] * len(codes))
         sql += f" AND cte.school_code IN ({placeholders})"
         params.extend([int(c) for c in codes])
-        print(f"🟡 Filter: school_codes={codes}")
+        print(f"Filter: school_codes={codes}")
 
     mobile_no = filters.get('mobile_no')
     if mobile_no:
         sql += " AND cte.mobile_no = %s"
         params.append(mobile_no)
-        print(f"🟡 Filter: mobile_no={mobile_no}")
+        print(f"Filter: mobile_no={mobile_no}")
 
     count_sql = f"SELECT COUNT(*) AS total FROM ({sql}) AS sub"
-    print(f" Count SQL: {count_sql}")
-    print(f" Count Params: {params}")
+    print(f"Count SQL: {count_sql}")
+    print(f"Count Params: {params}")
 
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            print(" Executing count query...")
+            print("Executing count query...")
             cursor.execute(count_sql, tuple(params))
             total = cursor.fetchone()['total']
-            print(f" Total rows: {total}")
+            print(f"Total rows: {total}")
 
         page_sql = sql + " ORDER BY cte.Requested_At DESC LIMIT %s OFFSET %s"
         page_params = params + [per_page, offset]
-        print(f" Page SQL: {page_sql}")
-        print(f" Page Params: {page_params}")
+        print(f"Page SQL: {page_sql}")
+        print(f"Page Params: {page_params}")
 
         with connection.cursor() as cursor:
-            print(" Executing page query...")
+            print("Executing page query...")
             cursor.execute(page_sql, tuple(page_params))
             rows = cursor.fetchall()
             base_url = os.getenv('BASE_URL')
             for r in rows:
                 r['media_url'] = f"{base_url}/{r['media_path']}" if r.get('media_path') else None
-            print(f" Rows fetched: {len(rows)}")
+            print(f"Rows fetched: {len(rows)}")
 
-        # Return paginated response with proper pagination metadata
         return jsonify({
             'data': rows,
             'pagination': {
@@ -5168,11 +5281,11 @@ def mission_search():
         })
 
     except Exception as e:
-        print(f" Error occurred: {e}")
+        print(f"Error occurred: {e}")
         return jsonify({'error': str(e)}), 500
     finally:
         connection.close()
-        print(" Connection closed.")
+        print("Connection closed.")
 
 @app.route('/api/update_mission_status', methods=['POST'])
 def update_mission_status():
@@ -5194,7 +5307,7 @@ def update_mission_status():
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             if action == 'approve':
-                # ✅ 1. Mark approved
+                # 1. Mark approved
                 print("Marking mission as approved...")
                 cursor.execute("""
                     UPDATE la_mission_completes
@@ -5202,7 +5315,7 @@ def update_mission_status():
                     WHERE id = %s AND user_id = %s
                 """, (now, row_id, student_id))
 
-                # ✅ 2. Fetch mission details
+                # 2. Fetch mission details
                 cursor.execute("""
                     SELECT
                         lm.la_level_id,
@@ -5230,7 +5343,7 @@ def update_mission_status():
                     print(f"Mission points resolved: {mission_points} for mission_type {mission_type}")
 
                     if mission_points and mission_points > 0:
-                        # ✅ 3. Student coin transaction
+                        # 3. Student coin transaction
                         print("Inserting student coin transaction...")
                         cursor.execute("""
                             INSERT INTO coin_transactions
@@ -5247,7 +5360,7 @@ def update_mission_status():
                             now
                         ))
 
-                        # ✅ 4. Update student earn_coins
+                        # 4. Update student earn_coins
                         print("Updating student earn_coins...")
                         cursor.execute("""
                             UPDATE users
@@ -5256,7 +5369,7 @@ def update_mission_status():
                             WHERE id = %s
                         """, (mission_points, now, student_id))
 
-                        # ✅ 5. Update points in la_mission_completes
+                        # 5. Update points in la_mission_completes
                         print("Updating la_mission_completes.points...")
                         cursor.execute("""
                             UPDATE la_mission_completes
@@ -5264,7 +5377,7 @@ def update_mission_status():
                             WHERE id = %s AND user_id = %s
                         """, (mission_points, now, row_id, student_id))
 
-                        # ✅ 6. Fetch teacher who assigned this mission
+                        # 6. Fetch teacher who assigned this mission
                         cursor.execute("""
                             SELECT teacher_id
                             FROM la_mission_assigns
@@ -5276,7 +5389,7 @@ def update_mission_status():
                         if teacher_row:
                             teacher_id = teacher_row["teacher_id"]
 
-                            # ✅ 7. Get teacher reward points
+                            # 7. Get teacher reward points
                             cursor.execute("""
                                 SELECT teacher_correct_submission_points
                                 FROM la_levels
@@ -5289,7 +5402,7 @@ def update_mission_status():
                             if teacher_points and teacher_points > 0:
                                 print(f"Rewarding teacher {teacher_id} with {teacher_points} points")
 
-                                # ✅ 8. Insert teacher transaction
+                                # 8. Insert teacher transaction
                                 cursor.execute("""
                                     INSERT INTO coin_transactions
                                         (user_id, type, amount, coinable_type, coinable_id, created_at, updated_at)
@@ -5305,7 +5418,7 @@ def update_mission_status():
                                     now
                                 ))
 
-                                # ✅ 9. Update teacher earn_coins
+                                # 9. Update teacher earn_coins
                                 cursor.execute("""
                                     UPDATE users
                                     SET earn_coins = earn_coins + %s,
@@ -5313,13 +5426,16 @@ def update_mission_status():
                                     WHERE id = %s
                                 """, (teacher_points, now, teacher_id))
                             else:
-                                print("⚠ No teacher reward points set for this level")
+                                print("No teacher reward points set for this level")
                         else:
-                            print("⚠ No assigning teacher found")
+                            print("No assigning teacher found")
                     else:
-                        print("⚠ mission_points = 0 — skipping coin reward")
+                        print("mission_points = 0 — skipping coin reward")
                 else:
-                    print("⚠ Could not fetch mission details")
+                    print("Could not fetch mission details")
+
+                # ---- NEW: send push notification ----
+                notify_mission_status(mission_id, student_id, 'approved')
 
             elif action == 'reject':
                 print("Marking mission as rejected...")
@@ -5328,21 +5444,24 @@ def update_mission_status():
                     SET rejected_at = %s, approved_at = NULL
                     WHERE id = %s AND user_id = %s
                 """, (now, row_id, student_id))
+
+                # ---- NEW: send push notification ----
+                notify_mission_status(mission_id, student_id, 'rejected')
+
             else:
-                print("❌ Invalid action passed.")
+                print("Invalid action passed.")
                 return jsonify({'error': 'Invalid action'}), 400
 
             conn.commit()
-            print("✅ Transaction committed successfully")
+            print("Transaction committed successfully")
             return jsonify({'success': True}), 200
 
     except Exception as e:
-        print(f"❌ Exception: {str(e)}")
+        print(f"Exception: {str(e)}")
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
-        print("🔚 Connection closed")
-
+        print("Connection closed")
         
 ###################################################################################
 ###################################################################################
