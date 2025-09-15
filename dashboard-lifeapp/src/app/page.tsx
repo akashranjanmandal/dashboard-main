@@ -677,12 +677,12 @@ export default function UserAnalyticsDashboard() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(filterParams),
         }),
-        fetch(`${api_startpoint}/api/session_participants_total`, {
+        fetch(`${api_startpoint}/api/session_participants_total_dashboard`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(filterParams),
         }),
-        fetch(`${api_startpoint}/api/mentor_participated_in_sessions_total`, {
+        fetch(`${api_startpoint}/api/mentor_participated_in_sessions_total_dashboard`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(filterParams),
