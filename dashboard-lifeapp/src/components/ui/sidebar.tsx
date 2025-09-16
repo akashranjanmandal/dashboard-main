@@ -2,7 +2,13 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Home, ChevronDown, Terminal } from "lucide-react";
+import {
+  Home,
+  ChevronDown,
+  Terminal,
+  Database,
+  ArrowLeftRight,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   IconBackpack,
@@ -120,17 +126,23 @@ const DbToggle = () => {
         onClick={toggle}
         disabled={loading}
         className={cn(
-          "w-full flex items-center justify-between rounded-md px-3 py-2 text-sm transition",
-          mode === "prod"
-            ? "bg-emerald-500/20 text-emerald-400"
-            : "bg-orange-500/20 text-orange-400"
+          "w-full flex items-center justify-between rounded-xl px-3 py-2 text-sm transition",
+          "bg-gray-900/50 text-gray-300 ring-1 ring-gray-700 hover:ring-gray-600",
+          "backdrop-blur-sm"
         )}
       >
         <span className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-current" />
-          <span>{mode === "prod" ? "Production" : "Staging"}</span>
+          <Database className="h-4 w-4" />
+          <span
+            className={cn(
+              "font-medium",
+              mode === "prod" ? "text-emerald-400" : "text-orange-400"
+            )}
+          >
+            {mode === "prod" ? "Production" : "Staging"}
+          </span>
         </span>
-        <span className="text-xs underline">switch</span>
+        <ArrowLeftRight className="h-4 w-4 text-gray-500" />
       </button>
     </div>
   );
@@ -446,8 +458,8 @@ export function Sidebar() {
         </nav>
       </div>
 
-      {/* ----------  NEW TOGGLE + OLD LOGOUT  ---------- */}
-      <div className="border-t border-gray-800">
+      {/* ----------   TOGGLE +  LOGOUT  ---------- */}
+      <div>
         <DbToggle />
         <div className="p-4">
           <button
