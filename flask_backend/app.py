@@ -21,9 +21,8 @@ from dotenv import load_dotenv
 import uuid
 import boto3
 
-# ----------  NEW: in-memory toggle ----------
+
 CURRENT_DB_MODE = "prod"          # 'prod' | 'staging'
-# ----------  END NEW  -----------------------
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -43,7 +42,7 @@ DO_SPACES_REGION = os.getenv("DO_SPACES_REGION")
 DO_SPACES_BUCKET = os.getenv("DO_SPACES_BUCKET")
 DO_SPACES_ENDPOINT=os.getenv("DO_SPACES_ENDPOINT")
 
-# ----------  UPDATED connection factory ----------
+
 def get_db_connection():
     if CURRENT_DB_MODE == "prod":
         host = os.getenv("DB_HOST", "139.59.84.157")
@@ -62,9 +61,9 @@ def get_db_connection():
         database=os.getenv("DB_DATABASE", "lifeapp"),
         cursorclass=pymysql.cursors.DictCursor,
     )
-# ----------  END UPDATED  -----------------------
 
-# ----------  NEW REST endpoints ----------
+
+
 @app.route("/api/db-mode", methods=["GET"])
 def db_mode():
     return jsonify({"mode": CURRENT_DB_MODE})
@@ -74,9 +73,9 @@ def toggle_db():
     global CURRENT_DB_MODE
     CURRENT_DB_MODE = "staging" if CURRENT_DB_MODE == "prod" else "prod"
     return jsonify({"mode": CURRENT_DB_MODE})
-# ----------  END NEW  -----------------------
 
-# ----------  existing routes untouched ----------
+
+
 @app.route("/api/login", methods=["POST"])
 def admin_login():
     data = request.json
@@ -11053,13 +11052,15 @@ def fetch_visions():
     status = qs.get('status')
     subject = qs.get('subject_id')
     level = qs.get('level_id')
+    allow_for = qs.get('allow_for')  # Add this
+    chapter = qs.get('chapter')  # Add this
     page = int(qs.get('page', 1))
     per_page = int(qs.get('per_page', 30))
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # Build count query
+            # Build count query with new filters
             count_sql = "SELECT COUNT(DISTINCT v.id) AS total FROM lifeapp.visions v WHERE 1=1"
             count_params = []
             if status in ('0','1'):
@@ -11071,11 +11072,14 @@ def fetch_visions():
             if level:
                 count_sql += " AND v.la_level_id=%s"
                 count_params.append(level)
+            if allow_for:  # Add this
+                count_sql += " AND v.allow_for=%s"
+                count_params.append(int(allow_for))
                 
             cursor.execute(count_sql, count_params)
             total = cursor.fetchone()['total']
 
-            # Build main query
+            # Build main query with JOINs for chapters
             sql = """
             SELECT
                 v.id AS vision_id,
@@ -11091,11 +11095,14 @@ def fetch_visions():
                 q.question_type,
                 JSON_UNQUOTE(JSON_EXTRACT(q.question,'$.en')) AS question,
                 q.options,
-                q.correct_answer
+                q.correct_answer,
+                GROUP_CONCAT(DISTINCT c.title SEPARATOR ', ') AS chapters  -- Add this
             FROM lifeapp.visions v
             LEFT JOIN lifeapp.la_subjects s ON s.id = v.la_subject_id
             LEFT JOIN lifeapp.la_levels l ON l.id = v.la_level_id
             LEFT JOIN lifeapp.vision_questions q ON q.vision_id = v.id
+            LEFT JOIN lifeapp.vision_chapter vc ON vc.vision_id = v.id  -- Add this
+            LEFT JOIN lifeapp.chapters c ON c.id = vc.chapter_id  -- Add this
             WHERE 1=1
             """
             params = []
@@ -11108,8 +11115,14 @@ def fetch_visions():
             if level:
                 sql += " AND v.la_level_id=%s"
                 params.append(level)
+            if allow_for:  # Add this
+                sql += " AND v.allow_for=%s"
+                params.append(int(allow_for))
+            if chapter:  # Add this
+                sql += " AND c.title LIKE %s"
+                params.append(f"%{chapter}%")
 
-            sql += " ORDER BY v.id DESC LIMIT %s OFFSET %s"
+            sql += " GROUP BY v.id, q.id ORDER BY v.id DESC LIMIT %s OFFSET %s"  # Add GROUP BY
             offset = (page - 1) * per_page
             params.extend([per_page, offset])
             
@@ -11131,6 +11144,7 @@ def fetch_visions():
                         'level': r['level'],
                         'status': r['status'],
                         'index': r['idx'],
+                        'chapters': r['chapters'].split(', ') if r['chapters'] else [],  # Add this
                         'questions': []
                     }
                 # Only add question if it exists
@@ -11162,25 +11176,40 @@ def fetch_visions():
     finally:
         conn.close()
 
-# 2. Add Vision + Question
+#fetch chapters for the filter dropdown
+@app.route('/api/chapters', methods=['GET'])
+def get_chapters():
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, title FROM lifeapp.chapters ORDER BY title")
+            chapters = cursor.fetchall()
+            return jsonify(chapters), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+# 2. Add Vision + Question + Chapters
 @app.route('/api/visions', methods=['POST'])
 def add_vision():
     data = request.get_json() or {}
-    print("📥 [ADD] Incoming Vision Payload:", json.dumps(data, indent=2))
+    print(" [ADD] Incoming Vision Payload:", json.dumps(data, indent=2))
 
     required = ['title','description','allow_for','subject_id','level_id','status','questions']
     for f in required:
         if f not in data:
-            print(f"❌ [ADD] Missing field: {f}")
+            print(f" [ADD] Missing field: {f}")
             return jsonify({'error': f'Missing field {f}'}), 400
 
-    print("✅ [ADD] All required fields present")
-    print("🔢 [ADD] Index received:", data.get('index'))
+    print("[ADD] All required fields present")
+    print("[ADD] Index received:", data.get('index'))
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # --- CORRECTED: Removed updated_at from INSERT columns and %s ---
     vsql = """INSERT INTO lifeapp.visions
-      (title,description,youtube_url,allow_for,la_subject_id,la_level_id,status,created_at,updated_at,`index`)
-      VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
+      (title,description,youtube_url,allow_for,la_subject_id,la_level_id,status,created_at,`index`)
+      VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
     vparams = (
       json.dumps({'en':data['title']}),
       json.dumps({'en':data['description']}),
@@ -11189,46 +11218,63 @@ def add_vision():
       data['subject_id'],
       data['level_id'],
       int(data['status']),
-      now, now,
+      now, # created_at
+      # --- CORRECTED: Removed 'now' for updated_at ---
       int(data.get('index', 1))
     )
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            print("🚀 [ADD] Inserting Vision...")
+            print(" [ADD] Inserting Vision...")
             cur.execute(vsql, vparams)
             vid = cur.lastrowid
-            print("✅ [ADD] Vision inserted with ID:", vid)
+            print(" [ADD] Vision inserted with ID:", vid)
 
+            # Insert questions
+            # --- CORRECTED: Removed updated_at from INSERT columns and %s ---
             for i, q in enumerate(data['questions']):
-                print(f"📘 [ADD] Inserting Question {i+1}: Type={q['question_type']}")
+                print(f" [ADD] Inserting Question {i+1}: Type={q['question_type']}")
                 qsql = """INSERT INTO lifeapp.vision_questions
-                  (vision_id,question,question_type,options,correct_answer,created_at,updated_at)
-                  VALUES(%s,%s,%s,%s,%s,%s,%s)"""
+                  (vision_id,question,question_type,options,correct_answer,created_at)
+                  VALUES(%s,%s,%s,%s,%s,%s)"""
                 qparams = (
                   vid,
                   json.dumps({'en': q['question']}),
                   q['question_type'],
                   json.dumps(q.get('options')) if q.get('options') else None,
                   q.get('correct_answer'),
-                  now, now
+                  now # created_at
+                  # --- CORRECTED: Removed 'now' for updated_at ---
                 )
                 cur.execute(qsql, qparams)
 
+            # Insert chapter associations
+            # --- CORRECTED: Removed updated_at from INSERT columns and %s ---
+            if 'chapter_ids' in data and data['chapter_ids']:
+                print(f" [ADD] Adding {len(data['chapter_ids'])} chapter associations")
+                for chapter_id in data['chapter_ids']:
+                    cur.execute("""
+                        INSERT INTO lifeapp.vision_chapter (vision_id, chapter_id, created_at)
+                        VALUES (%s, %s, %s)
+                    """, (vid, chapter_id, now)) # Only created_at
+
             conn.commit()
-            print("🎉 [ADD] All questions saved")
+            print(" [ADD] All questions and chapters saved")
             return jsonify({'vision_id': vid}), 201
     except Exception as e:
-        print("🔥 [ADD] Error:", str(e))
+        print(" [ADD] Error:", str(e))
+        # Log the full traceback for debugging
+        import traceback
+        app.logger.error(f"Error in add_vision: {e}\n{traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
 
-# 3. Update Vision + All Questions
+# 3. Update Vision + All Questions + Chapters
 @app.route('/api/visions/<int:vision_id>', methods=['PUT'])
 def update_vision(vision_id):
     data = request.get_json() or {}
-    print(f"📥 [EDIT] Vision ID {vision_id} Payload:", json.dumps(data, indent=2))
+    print(f" [EDIT] Vision ID {vision_id} Payload:", json.dumps(data, indent=2))
 
     required = [
         'title','description','youtube_url',
@@ -11240,14 +11286,15 @@ def update_vision(vision_id):
             print(f"❌ [EDIT] Missing field: {f}")
             return jsonify({'error': f'Missing field {f}'}), 400
 
-    print("✅ [EDIT] All required fields present")
-    print(f"🔢 [EDIT] Index received: {data.get('index')} for Vision ID {vision_id}")
+    print(" [EDIT] All required fields present")
+    print(f" [EDIT] Index received: {data.get('index')} for Vision ID {vision_id}")
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            print("🛠️ [EDIT] Updating vision row...")
+            print(" [EDIT] Updating vision row...")
+            # --- CORRECTED: Removed updated_at from SET clause and %s ---
             cursor.execute("""
                 UPDATE lifeapp.visions
                 SET
@@ -11258,7 +11305,6 @@ def update_vision(vision_id):
                   la_subject_id = %s,
                   la_level_id   = %s,
                   status        = %s,
-                  updated_at    = %s,
                   `index`       = %s
                 WHERE id = %s
             """, (
@@ -11269,41 +11315,62 @@ def update_vision(vision_id):
                 data['subject_id'],
                 data['level_id'],
                 int(data['status']),
-                now,
+                # --- CORRECTED: Removed 'now' for updated_at ---
                 int(data.get('index', 1)),
                 vision_id
             ))
 
-            print("🧹 [EDIT] Deleting existing questions for vision...")
+            print(" [EDIT] Deleting existing questions for vision...")
             cursor.execute("DELETE FROM lifeapp.vision_questions WHERE vision_id = %s", (vision_id,))
-            print("✅ [EDIT] Existing questions removed")
+            print(" [EDIT] Existing questions removed")
 
+            # Insert new questions
+            # --- CORRECTED: Removed updated_at from INSERT columns and %s ---
             for i, q in enumerate(data['questions']):
-                print(f"📘 [EDIT] Inserting Question {i+1}: Type={q['question_type']}")
+                print(f" [EDIT] Inserting Question {i+1}: Type={q['question_type']}")
                 cursor.execute("""
                     INSERT INTO lifeapp.vision_questions
                       (vision_id, question, question_type,
                        options, correct_answer,
-                       created_at, updated_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s)
+                       created_at)
+                    VALUES (%s,%s,%s,%s,%s,%s)
                 """, (
                     vision_id,
                     json.dumps({'en': q['question']}),
                     q['question_type'],
                     json.dumps(q.get('options')) if q.get('options') else None,
                     q.get('correct_answer'),
-                    now, now
+                    now # created_at for new question
+                    # --- CORRECTED: Removed 'now' for updated_at ---
                 ))
 
+            # Update chapter associations
+            print(" [EDIT] Deleting existing chapter associations...")
+            cursor.execute("DELETE FROM lifeapp.vision_chapter WHERE vision_id = %s", (vision_id,))
+
+            # Insert new chapter associations
+            # --- CORRECTED: Removed updated_at from INSERT columns and %s ---
+            if 'chapter_ids' in data and data['chapter_ids']:
+                print(f" [EDIT] Adding {len(data['chapter_ids'])} chapter associations")
+                for chapter_id in data['chapter_ids']:
+                    cursor.execute("""
+                        INSERT INTO lifeapp.vision_chapter (vision_id, chapter_id, created_at)
+                        VALUES (%s, %s, %s)
+                    """, (vision_id, chapter_id, now)) # Only created_at
+
             conn.commit()
-            print(f"🎉 [EDIT] Vision ID {vision_id} updated successfully")
+            print(f" [EDIT] Vision ID {vision_id} updated successfully")
             return jsonify({'success': True}), 200
 
     except Exception as e:
-        print("🔥 [EDIT] Error:", str(e))
+        print(" [EDIT] Error:", str(e))
+        # Log the full traceback for debugging
+        import traceback
+        app.logger.error(f"Error in update_vision (ID: {vision_id}): {e}\n{traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+
 
 # 4. Delete Vision + All Questions
 @app.route('/api/visions/<int:vision_id>', methods=['DELETE'])
@@ -14406,6 +14473,536 @@ def download_faq_template():
         # Return a simple error CSV or plain text error
         return "Error generating template", 500
 
+
+
+###################################################################################
+###################################################################################
+######################## SETTINGS/CHAPTERS APIs ###################################
+###################################################################################
+###################################################################################
+
+# 1. Fetch Boards for filters and modals (Specific to Chapters Page)
+@app.route('/api/chapterpage/data/boards', methods=['GET'])
+def get_boards_for_chapters_page():
+    """Fetches all Boards (id, name) for Chapter page dropdowns."""
+    sql = "SELECT id, name FROM lifeapp.la_boards WHERE status = 1 ORDER BY name ASC"
+    try:
+        connection = get_db_connection()
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(sql)
+            result = cursor.fetchall()
+            return jsonify(result if result else []), 200
+    except Exception as e:
+        print(f"Error fetching boards for chapters page: {e}")
+        return jsonify({'error': f'Failed to fetch boards: {str(e)}'}), 500
+    finally:
+        connection.close()
+
+# 2. Fetch Grades for filters and modals (Specific to Chapters Page)
+@app.route('/api/chapterpage/data/grades', methods=['GET'])
+def get_grades_for_chapters_page():
+    """Fetches all Grades (id, name) for Chapter page dropdowns."""
+    sql = "SELECT id, name FROM lifeapp.la_grades WHERE status = 1 ORDER BY CAST(name AS UNSIGNED) ASC"
+    try:
+        connection = get_db_connection()
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(sql)
+            result = cursor.fetchall()
+            return jsonify(result if result else []), 200
+    except Exception as e:
+        print(f"Error fetching grades for chapters page: {e}")
+        return jsonify({'error': f'Failed to fetch grades: {str(e)}'}), 500
+    finally:
+        connection.close()
+
+# 3. Fetch Subjects for filters and modals (Specific to Chapters Page)
+@app.route('/api/chapterpage/data/subjects', methods=['GET'])
+def get_subjects_for_chapters_page():
+    """Fetches all Subjects (id, title) for Chapter page dropdowns."""
+    # Assuming title is stored as JSON like {"en": "Science"}
+    # Adjust the JSON path if the structure is different or locale varies
+    sql = """
+        SELECT id,
+               CASE
+                   WHEN JSON_UNQUOTE(JSON_EXTRACT(title, '$.en')) IS NOT NULL
+                   THEN JSON_UNQUOTE(JSON_EXTRACT(title, '$.en'))
+                   ELSE title
+               END AS title
+        FROM lifeapp.la_subjects
+        WHERE status = 1
+        ORDER BY title ASC
+    """
+    try:
+        connection = get_db_connection()
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(sql)
+            result = cursor.fetchall()
+            return jsonify(result if result else []), 200
+    except Exception as e:
+        print(f"Error fetching subjects for chapters page: {e}")
+        return jsonify({'error': f'Failed to fetch subjects: {str(e)}'}), 500
+    finally:
+        connection.close()
+
+# 4. Fetch Chapters (with optional filtering and pagination) (Specific to Chapters Page)
+@app.route('/api/chapterpage/data/chapters', methods=['GET'])
+def get_chapters_for_chapters_page():
+    """Fetches Chapters with optional filtering and pagination (for Chapters page)."""
+    try:
+        # --- Pagination Parameters ---
+        page = request.args.get('page', 1, type=int)
+        size = request.args.get('size', 20, type=int) # Default page size 20
+
+        # Ensure page and size are valid
+        if page < 1:
+            page = 1
+        if size < 1 or size > 100: # Optional: Set a max page size limit
+            size = 20
+
+        # --- Filter Parameters ---
+        board_id = request.args.get('board_id', '').strip()
+        grade_id = request.args.get('grade_id', '').strip()
+        subject_id = request.args.get('subject_id', '').strip()
+        title_search = request.args.get('title_search', '').strip()
+
+        # --- Base SQL Query ---
+        # Base SQL query joining Chapter with Board, Grade, Subject
+        base_sql = """
+            SELECT
+                c.id,
+                c.la_board_id,
+                c.la_grade_id,
+                c.la_subject_id,
+                c.title,
+                c.description,
+                c.chapter_no,
+                c.created_at,
+                c.updated_at,
+                b.name AS board_name,
+                g.name AS grade_name,
+                CASE
+                    WHEN JSON_UNQUOTE(JSON_EXTRACT(s.title, '$.en')) IS NOT NULL
+                    THEN JSON_UNQUOTE(JSON_EXTRACT(s.title, '$.en'))
+                    ELSE s.title
+                END AS subject_title
+            FROM lifeapp.chapters c
+            LEFT JOIN lifeapp.la_boards b ON c.la_board_id = b.id
+            LEFT JOIN lifeapp.la_grades g ON c.la_grade_id = g.id
+            LEFT JOIN lifeapp.la_subjects s ON c.la_subject_id = s.id
+        """
+
+        where_clauses = []
+        params = []
+
+        # --- Add filtering conditions ---
+        if board_id:
+            where_clauses.append("c.la_board_id = %s")
+            params.append(board_id)
+        if grade_id:
+            where_clauses.append("c.la_grade_id = %s")
+            params.append(grade_id)
+        if subject_id:
+            where_clauses.append("c.la_subject_id = %s")
+            params.append(subject_id)
+        if title_search:
+            where_clauses.append("c.title LIKE %s")
+            params.append(f"%{title_search}%")
+
+        # --- Construct WHERE clause ---
+        where_sql = ""
+        if where_clauses:
+            where_sql = " WHERE " + " AND ".join(where_clauses)
+
+        # --- Sorting ---
+        # Sort primarily by Board Name (alphabetical), then by Grade (numeric),
+        # then by Chapter Number (all ascending)
+        order_sql = " ORDER BY b.name ASC, CAST(g.name AS UNSIGNED) ASC, c.chapter_no ASC, c.updated_at DESC"
+
+        # --- Count Total Records (for pagination) ---
+        count_sql = f"SELECT COUNT(*) as total FROM ({base_sql}{where_sql}) as filtered_chapters"
+        # Note: A more efficient way for large datasets might be to count directly on the base table
+        # with the same WHERE conditions, but this subquery approach works well for moderate sizes.
+        connection = get_db_connection()
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(count_sql, params)
+            total_count_result = cursor.fetchone()
+            total_count = total_count_result['total'] if total_count_result else 0
+
+        # --- Calculate Pagination ---
+        total_pages = (total_count + size - 1) // size # Ceiling division
+        if page > total_pages and total_pages > 0:
+            page = total_pages # Adjust page if it's beyond the last page
+
+        offset = (page - 1) * size
+
+        # --- Final SQL Query with LIMIT and OFFSET ---
+        final_sql = f"{base_sql}{where_sql}{order_sql} LIMIT %s OFFSET %s"
+        # Add LIMIT and OFFSET parameters
+        query_params = params + [size, offset]
+
+        # --- Execute Query ---
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(final_sql, query_params)
+            raw_results = cursor.fetchall()
+
+        # --- Format Results ---
+        formatted_results = []
+        for row in raw_results:
+            # Ensure datetime objects are serializable
+            formatted_row = {
+                'id': row['id'],
+                'la_board_id': row['la_board_id'],
+                'la_grade_id': row['la_grade_id'],
+                'la_subject_id': row['la_subject_id'],
+                'title': row['title'],
+                'description': row['description'],
+                'chapter_no': row['chapter_no'],
+                'created_at': row['created_at'].strftime('%Y-%m-%d %H:%M:%S') if row['created_at'] else None,
+                'updated_at': row['updated_at'].strftime('%Y-%m-%d %H:%M:%S') if row['updated_at'] else None,
+                'board_name': row['board_name'],
+                'grade_name': row['grade_name'],
+                'subject_title': row['subject_title']
+            }
+            formatted_results.append(formatted_row)
+
+        # --- Prepare Response ---
+        response_data = {
+            'data': formatted_results,
+            'current_page': page,
+            'page_size': size,
+            'total_pages': total_pages,
+            'total_count': total_count
+        }
+
+        connection.close()
+        return jsonify(response_data), 200
+
+    except Exception as e:
+        import traceback
+        print(f"Error fetching chapters for chapters page (with pagination): {e}")
+        print(traceback.format_exc())
+        if 'connection' in locals() and connection.open:
+            connection.close()
+        return jsonify({'error': f'Failed to fetch chapters: {str(e)}'}), 500
+
+
+# 5. Add a new Chapter (Specific to Chapters Page)
+@app.route('/api/chapterpage/data/chapters', methods=['POST'])
+def add_chapter_for_chapters_page():
+    """Adds a new Chapter entry (for Chapters page)."""
+    connection = None
+    try:
+        # Get form data
+        la_board_id = request.form.get('la_board_id', type=int)
+        la_grade_id = request.form.get('la_grade_id', type=int)
+        la_subject_id = request.form.get('la_subject_id', type=int)
+        title = request.form.get('title', '').strip()
+        description = request.form.get('description', '').strip() or None # Handle empty string as NULL
+        chapter_no = request.form.get('chapter_no', type=int)
+
+        # Basic validation
+        if not all([la_board_id, la_grade_id, la_subject_id, title, chapter_no]):
+            return jsonify({'error': 'Missing required fields: Board, Grade, Subject, Title, Chapter Number'}), 400
+
+        # Check if board, grade, subject exist (optional but good practice)
+        # You can add checks similar to FAQ category validation if needed.
+
+        sql = """
+            INSERT INTO lifeapp.chapters
+            (la_board_id, la_grade_id, la_subject_id, title, description, chapter_no, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+        """
+        params = (la_board_id, la_grade_id, la_subject_id, title, description, chapter_no)
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params)
+            new_id = cursor.lastrowid
+        connection.commit()
+        return jsonify({'message': 'Chapter added successfully', 'id': new_id}), 201
+    except ValueError as ve:
+        if connection:
+            connection.rollback()
+        return jsonify({'error': f'Invalid data type provided: {ve}'}), 400
+    except Exception as e:
+        print(f"Error adding chapter for chapters page: {e}")
+        if connection:
+            connection.rollback()
+        return jsonify({'error': 'Failed to add chapter due to a server error.'}), 500
+    finally:
+        if connection and connection.open:
+            connection.close()
+
+# 6. Update an existing Chapter (Specific to Chapters Page)
+@app.route('/api/chapterpage/data/chapters/<int:chapter_id>', methods=['PUT'])
+def update_chapter_for_chapters_page(chapter_id):
+    """Updates an existing Chapter entry (for Chapters page)."""
+    try:
+        # Get form data
+        la_board_id = request.form.get('la_board_id', type=int)
+        la_grade_id = request.form.get('la_grade_id', type=int)
+        la_subject_id = request.form.get('la_subject_id', type=int)
+        title = request.form.get('title', '').strip()
+        description = request.form.get('description', '').strip() or None
+        chapter_no = request.form.get('chapter_no', type=int)
+
+        # Basic validation
+        if not all([la_board_id, la_grade_id, la_subject_id, title, chapter_no]):
+            return jsonify({'error': 'Missing required fields: Board, Grade, Subject, Title, Chapter Number'}), 400
+
+        # Check if Chapter exists
+        check_sql = "SELECT id FROM lifeapp.chapters WHERE id = %s"
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute(check_sql, (chapter_id,))
+            if not cursor.fetchone():
+                connection.close()
+                return jsonify({'error': 'Chapter not found'}), 404
+
+        sql = """
+            UPDATE lifeapp.chapters
+            SET la_board_id = %s, la_grade_id = %s, la_subject_id = %s,
+                title = %s, description = %s, chapter_no = %s, updated_at = NOW()
+            WHERE id = %s
+        """
+        params = (la_board_id, la_grade_id, la_subject_id, title, description, chapter_no, chapter_id)
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params)
+        connection.commit()
+        connection.close()
+        return jsonify({'message': 'Chapter updated successfully'}), 200
+    except ValueError as ve:
+        return jsonify({'error': f'Invalid data type: {ve}'}), 400
+    except Exception as e:
+        print(f"Error updating Chapter ID {chapter_id} for chapters page: {e}")
+        connection.rollback()
+        return jsonify({'error': 'Failed to update chapter'}), 500
+    finally:
+        if 'connection' in locals() and connection.open:
+            connection.close()
+
+# 7. Delete a Chapter (Specific to Chapters Page)
+@app.route('/api/chapterpage/data/chapters/<int:chapter_id>', methods=['DELETE'])
+def delete_chapter_for_chapters_page(chapter_id):
+    """Deletes a Chapter entry (for Chapters page)."""
+    try:
+        # Check if Chapter exists
+        check_sql = "SELECT id FROM lifeapp.chapters WHERE id = %s"
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute(check_sql, (chapter_id,))
+            if not cursor.fetchone():
+                connection.close()
+                return jsonify({'error': 'Chapter not found'}), 404
+
+        sql = "DELETE FROM lifeapp.chapters WHERE id = %s"
+        with connection.cursor() as cursor:
+            cursor.execute(sql, (chapter_id,))
+        connection.commit()
+        connection.close()
+        return jsonify({'message': 'Chapter deleted successfully'}), 200
+    except Exception as e:
+        print(f"Error deleting Chapter ID {chapter_id} for chapters page: {e}")
+        connection.rollback()
+        return jsonify({'error': 'Failed to delete chapter'}), 500
+    finally:
+        if 'connection' in locals() and connection.open:
+            connection.close()
+
+# 8. Bulk Upload Chapters from CSV (Specific to Chapters Page)
+@app.route('/api/chapterpage/data/chapters/bulk_upload', methods=['POST'])
+def bulk_upload_chapters_for_chapters_page():
+    """Handles bulk upload of Chapters via CSV (for Chapters page)."""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part in the request'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected for upload'}), 400
+    if file and file.filename.endswith('.csv'):
+        connection = None
+        cursor = None
+        try:
+            stream = io.StringIO(file.stream.read().decode("utf-8-sig"), newline=None)
+            csv_input = csv.reader(stream)
+            header = next(csv_input, None)
+            expected_header = ['board_name', 'grade_name', 'subject_title', 'chapter_no', 'title', 'description']
+            if not header or header != expected_header:
+                 return jsonify({'error': f'Invalid CSV header. Expected: {expected_header}'}), 400
+
+            processed_count = 0
+            errors = []
+            connection = get_db_connection()
+            cursor = connection.cursor()
+
+            for row_num, row in enumerate(csv_input, start=2):
+                try:
+                    if len(row) != 6:
+                        errors.append(f"Row {row_num}: Invalid number of columns. Expected 6, got {len(row)}.")
+                        continue
+                    board_name_raw, grade_name_raw, subject_title_raw, chapter_no_raw, title_raw, description_raw = row
+                    board_name = board_name_raw.strip()
+                    grade_name = grade_name_raw.strip()
+                    subject_title = subject_title_raw.strip()
+                    chapter_no_str = chapter_no_raw.strip()
+                    title = title_raw.strip()
+                    description = description_raw.strip() if description_raw.strip() else None
+
+                    if not all([board_name, grade_name, subject_title, chapter_no_str, title]):
+                        errors.append(f"Row {row_num}: Missing required field(s).")
+                        continue
+
+                    try:
+                        chapter_no = int(chapter_no_str)
+                    except ValueError:
+                        errors.append(f"Row {row_num}: Chapter Number must be an integer.")
+                        continue
+
+                    # --- Board Lookup ---
+                    board_sql = "SELECT id FROM lifeapp.la_boards WHERE name = %s AND status = 1"
+                    cursor.execute(board_sql, (board_name,))
+                    board_result = cursor.fetchone()
+                    if not board_result:
+                        errors.append(f"Row {row_num}: Board '{board_name}' not found or inactive.")
+                        continue
+                    board_id = board_result['id']
+
+                    # --- Grade Lookup ---
+                    grade_sql = "SELECT id FROM lifeapp.la_grades WHERE name = %s AND status = 1"
+                    cursor.execute(grade_sql, (grade_name,))
+                    grade_result = cursor.fetchone()
+                    if not grade_result:
+                        errors.append(f"Row {row_num}: Grade '{grade_name}' not found or inactive.")
+                        continue
+                    grade_id = grade_result['id']
+
+                    # --- Subject Lookup (Match extracted title) ---
+                    # This query tries to match the plain title extracted from JSON
+                    subject_sql = """
+                        SELECT id FROM lifeapp.la_subjects
+                        WHERE status = 1
+                        AND (
+                            CASE
+                                WHEN JSON_UNQUOTE(JSON_EXTRACT(title, '$.en')) IS NOT NULL
+                                THEN JSON_UNQUOTE(JSON_EXTRACT(title, '$.en'))
+                                ELSE title
+                            END = %s
+                        )
+                    """
+                    cursor.execute(subject_sql, (subject_title,))
+                    subject_result = cursor.fetchone()
+                    if not subject_result:
+                        errors.append(f"Row {row_num}: Subject '{subject_title}' not found or inactive.")
+                        continue
+                    subject_id = subject_result['id']
+
+                    # --- Check for Duplicate Chapter Number within Board/Grade/Subject ---
+                    dup_check_sql = """
+                        SELECT id FROM lifeapp.chapters
+                        WHERE chapter_no = %s AND la_board_id = %s AND la_grade_id = %s AND la_subject_id = %s
+                    """
+                    cursor.execute(dup_check_sql, (chapter_no, board_id, grade_id, subject_id))
+                    if cursor.fetchone():
+                        errors.append(f"Row {row_num}: Chapter number {chapter_no} already exists for this Board/Grade/Subject combination.")
+                        continue
+
+                    # --- Insert Chapter ---
+                    insert_sql = """
+                        INSERT INTO lifeapp.chapters
+                        (la_board_id, la_grade_id, la_subject_id, title, description, chapter_no, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    """
+                    insert_data = (board_id, grade_id, subject_id, title, description, chapter_no)
+                    cursor.execute(insert_sql, insert_data)
+                    processed_count += 1
+                except Exception as row_error:
+                    tb_str = traceback.format_exc()
+                    error_detail = f"Row {row_num}: Unexpected processing error - {str(row_error)}."
+                    print(f"Bulk Upload Debug - Exception (Row {row_num}): {error_detail}\nTraceback: {tb_str}")
+                    errors.append(error_detail)
+                    continue
+
+            if connection:
+                connection.commit()
+
+            response_data = {
+                'message': f'Bulk upload completed. {processed_count} Chapters processed successfully.',
+                'processed': processed_count,
+                'errors': errors
+            }
+            if errors:
+                response_data['message'] += f" {len(errors)} row(s) had errors."
+                return jsonify(response_data), 207
+            else:
+                return jsonify(response_data), 201
+        except csv.Error as csv_err:
+            error_msg = f"CSV parsing error: {str(csv_err)}"
+            print(f"Bulk Upload Debug - CSV Error: {error_msg}")
+            if connection:
+                connection.rollback()
+            return jsonify({'error': f'Failed to parse CSV file. {error_msg}'}), 400
+        except Exception as e:
+            error_msg = f"Failed to process CSV file: {str(e)}"
+            tb_str = traceback.format_exc()
+            print(f"Bulk Upload Debug - General Error: {error_msg}\nTraceback: {tb_str}")
+            if connection:
+                connection.rollback()
+            return jsonify({'error': 'An internal server error occurred during bulk upload. Please check the server logs for details.'}), 500
+        finally:
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if connection:
+                try:
+                    if connection.open:
+                        connection.close()
+                except:
+                    pass
+    else:
+        return jsonify({'error': 'Invalid file type. Please upload a CSV file (.csv).'}), 400
+
+# 9. Download CSV Template for Chapters (Specific to Chapters Page)
+@app.route('/api/chapterpage/data/chapters/template.csv', methods=['GET'])
+def download_chapter_template_for_chapters_page():
+    """Provides a downloadable CSV template for bulk upload (for Chapters page)."""
+    try:
+        # Sample data matching the CSV structure - Updated for Testing
+        sample_rows = [
+            ("Tamil Nadu Board", "3", "Science in our daily life", "1", "My Body", "Introduction to the human body"),
+            ("Tamil Nadu Board", "3", "Science in our daily life", "2", "States of Matter", "Solid, Liquid, Gas"),
+            ("Tamil Nadu Board", "3", "Science in our daily life", "3", "Force", "Push and Pull")
+        ]
+
+        # Create CSV content in memory using StringIO
+        output = io.StringIO()
+        # Use csv.writer with quoting set to QUOTE_ALL to enclose all fields in double quotes
+        writer = csv.writer(output, quoting=csv.QUOTE_ALL)
+        # Write header row (also enclosed in quotes)
+        writer.writerow(['board_name', 'grade_name', 'subject_title', 'chapter_no', 'title', 'description'])
+        # Write sample data rows (all fields enclosed in quotes)
+        writer.writerows(sample_rows)
+
+        # Get the CSV string data
+        csv_data = output.getvalue()
+        output.close()
+
+        # Prepare the data for send_file using BytesIO with explicit UTF-8 encoding
+        mem = io.BytesIO()
+        mem.write(csv_data.encode('utf-8')) # Ensure UTF-8 encoding
+        mem.seek(0)
+
+        # Send the CSV file as an attachment
+        return send_file(
+            mem,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name='chapter_bulk_upload_template.csv'
+        )
+
+    except Exception as e:
+        error_msg = f"Error generating Chapter template for chapters page: {e}"
+        print(error_msg)
+        return error_msg, 500
 
 
 ###################################################################################
