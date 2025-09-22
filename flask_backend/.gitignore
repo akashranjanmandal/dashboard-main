@@ -3,3 +3,4 @@
 .local.env
 backend
 .vscode/
+.venv/
