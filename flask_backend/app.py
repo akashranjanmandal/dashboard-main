@@ -37,6 +37,7 @@ CORS(app, resources={
         ]
     }
 })
+# changes done here 
 
 
 # Load environment variables

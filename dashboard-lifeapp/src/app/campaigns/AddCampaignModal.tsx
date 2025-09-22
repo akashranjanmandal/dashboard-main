@@ -13,6 +13,7 @@ const inter = Inter({ subsets: ["latin"] });
 // const api_startpoint = 'https://lifeapp-api-vv1.vercel.app'
 // const api_startpoint = "http://152.42.239.141:5000";
 const api_startpoint = "https://admin-api.life-lab.org";
+// new startpoint added
 
 
 // Helper to safely parse JSON title
