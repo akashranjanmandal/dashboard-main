@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+# CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 # CORS(app, resources={
 #     r"/*": {
 #         "origins": [
@@ -38,6 +38,15 @@ CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 #     }
 # })
 # changes done here 
+
+
+# ----------------------------------------------
+# CORS – allow the IP you are testing from
+# ----------------------------------------------
+CORS(app,
+     origins=["http://152.42.239.141:3000",      # front-end IP+port
+              "https://admin.life-lab.org"],     # ready for future domain
+     supports_credentials=True)
 
 
 # Load environment variables
